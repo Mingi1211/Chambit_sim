@@ -1,0 +1,11 @@
+initial_joint_positions:
+  # Inside both Gazebo and Cyclo limits; avoids the invalid all-zero elbow pose.
+  arm_r_joint2: 0
+  arm_l_joint2: 0
+  arm_r_joint4: 0
+  arm_l_joint4: 0
+  arm_r_joint6: 0
+  arm_l_joint6: 0
+robots:
+  - {name: robot1, x: 0.0, y: -0.9, z: 0.2, yaw: 0.0}
+  - {name: robot2, x: 0.0, y: 0.9, z: 0.2, yaw: 0.0}

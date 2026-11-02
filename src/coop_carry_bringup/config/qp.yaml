@@ -1,0 +1,20 @@
+# Only parameters declared by the installed bimanual MoveL node.
+# Topic and model paths are supplied per robot by the launch file.
+control_frequency: 100.0
+time_step: 0.01
+trajectory_time: 0.0
+kp_position: 50.0
+kp_orientation: 50.0
+weight_position: 10.0
+weight_orientation: 1.0
+weight_damping: 0.1
+collision_buffer: 0.05
+collision_safe_distance: 0.02
+slack_penalty: 1000.0
+cbf_alpha: 50.0
+joint_state_timeout: 0.5
+lift_vel_bound: 0.0
+r_gripper_name: end_effector_r_link
+l_gripper_name: end_effector_l_link
+right_gripper_joint: gripper_r_joint1
+left_gripper_joint: gripper_l_joint1

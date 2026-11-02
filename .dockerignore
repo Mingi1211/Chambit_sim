@@ -1,0 +1,8 @@
+**/.git
+**/__pycache__
+**/.pytest_cache
+**/.vscode
+build
+install
+log
+src/ai_worker/docker

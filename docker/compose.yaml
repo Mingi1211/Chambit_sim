@@ -1,0 +1,60 @@
+name: internship
+x-common: &common
+  image: internship-coop:dev
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  network_mode: host
+  init: true
+  stop_signal: SIGINT
+  environment: &environment
+    RMW_IMPLEMENTATION: rmw_zenoh_cpp
+    ROS_DOMAIN_ID: '71'
+    GZ_PARTITION: internship_dual
+    ROS_LOG_DIR: /tmp/ros_logs
+  stop_grace_period: 20s
+services:
+  router:
+    <<: *common
+    command: [router]
+    healthcheck:
+      test: [CMD-SHELL, 'pgrep -x rmw_zenohd >/dev/null']
+      interval: 2s
+      timeout: 2s
+      retries: 15
+  gazebo:
+    <<: *common
+    command: [gazebo]
+    depends_on:
+      router: {condition: service_healthy}
+    environment:
+      <<: *environment
+      COOP_GUI: ${COOP_GUI:-false}
+      DISPLAY: ${DISPLAY:-:0}
+      QT_X11_NO_MITSHM: '1'
+    volumes:
+      - runtime:/run/coop
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    devices:
+      - /dev/dri:/dev/dri
+    healthcheck:
+      test: [CMD-SHELL, 'test -s /run/coop/ready']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  robot1:
+    <<: *common
+    command: [robot1]
+    depends_on:
+      gazebo: {condition: service_healthy}
+    volumes:
+      - runtime:/run/coop:ro
+  robot2:
+    <<: *common
+    command: [robot2]
+    depends_on:
+      gazebo: {condition: service_healthy}
+    volumes:
+      - runtime:/run/coop:ro
+volumes:
+  runtime:

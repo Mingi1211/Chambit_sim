@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>coop_carry_hardware</name><version>0.1.0</version>
+  <description>Stage 1 remote simulation hardware and Gazebo joint actuator.</description>
+  <maintainer email="team@example.com">Coop Carry Team</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>hardware_interface</depend><depend>pluginlib</depend><depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>gz_sim_vendor</depend><depend>gz_plugin_vendor</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

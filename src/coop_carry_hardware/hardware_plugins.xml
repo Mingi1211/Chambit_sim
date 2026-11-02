@@ -1,0 +1,7 @@
+<library path="coop_carry_remote_hardware">
+  <class name="coop_carry_hardware/RemoteGazeboSystem"
+         type="coop_carry_hardware::RemoteGazeboSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>Simulation-only position hardware with measured-state freshness checks.</description>
+  </class>
+</library>
