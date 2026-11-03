@@ -1,0 +1,8 @@
+# 실물 DYNAMIXEL 토크 → 전류 변환 (팔 관절 1~7, 양팔 공통). null이면 노드가 output:=dxl 실행을 거부한다(안전).
+# Kt_eff [N·m/A] : 관절 출력 기준 토크 상수 (모터 Kt × 감속비 × 효율, MR 11.8). 데이터시트 값으로 시작 → calib_kt.py 실측으로 교체
+# raw_per_A      : Goal Current 1 A당 raw 값 (모델 컨트롤 테이블의 Current 단위. ym070/ym080 .model은 unit 'raw'만 표기 → 데이터시트 확인)
+# current_limit_raw : 관절별 전류 명령 상한 (Current Limit 주소 66 이하로)
+# [미확인] 팔 모터 모델은 실물 접속 시 자동 인식 — dxl_state 토픽 또는 get_dxl_data 서비스로 ID 1~7·31~37 모델 확인 후 기입
+Kt_eff: [null, null, null, null, null, null, null]
+raw_per_A: [null, null, null, null, null, null, null]
+current_limit_raw: [null, null, null, null, null, null, null]

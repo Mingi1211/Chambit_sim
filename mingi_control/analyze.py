@@ -29,6 +29,8 @@ def load(path, side):
 
 def t12(a):
     L = load(a.log, a.side)
+    k0 = np.argmax(L['t'] >= a.t0) if a.t0 else 0               # --t0: 모드 전환 시각부터
+    L = {k: v[k0:] for k, v in L.items()}
     t = L['t'] - L['t'][0]
     p = np.c_[L['px'], L['py'], L['pz']]
     drift = np.linalg.norm(p - p[0], axis=1) * 1000
@@ -134,5 +136,6 @@ if __name__ == '__main__':
     ap.add_argument('--t_on', type=float); ap.add_argument('--t_off', type=float)
     ap.add_argument('--F', type=float, nargs=3)
     ap.add_argument('--t_step', type=float); ap.add_argument('--axis', default='y')
+    ap.add_argument('--t0', type=float, help='t12: 이 시각(로그 t)부터 처짐 계산')
     a = ap.parse_args()
     {'t12': t12, 't4': t4, 't5': t5, 'box': box}[a.kind](a)

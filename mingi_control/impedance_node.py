@@ -23,13 +23,14 @@ import time
 
 import numpy as np
 import pinocchio as pin
+import yaml
 import rclpy
 from actuator_msgs.msg import Actuators
 from geometry_msgs.msg import PoseStamped, Vector3
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, Float64, String
+from std_msgs.msg import Bool, Float64, Float64MultiArray, String
 
 # [문서 밖] 현대 sim_command_adapter·Gazebo 플러그인의 명령 순서(joint_map.yaml commanded_joints)
 COMMANDED = [f'arm_r_joint{i}' for i in range(1, 8)] + ['gripper_r_joint1'] + \
@@ -52,7 +53,10 @@ class Arm:
         self.fid = model.getFrameId(f'end_effector_{side}_link')
         self.cmd_idx = [COMMANDED.index(n) for n in self.names]
         P = node.get_parameter
-        self.K = np.diag(list(P('K_pos').value) + list(P('K_rot').value))
+        role = P('role').value                      # [문서 #7] 리더 전 축 단단 / 팔로워 수평(xy)만 부드럽게, z는 둘 다 단단
+        K_pos = P(f'{role}_K_pos').value if role in ('leader', 'follower') else P('K_pos').value
+        self.K = np.diag(list(K_pos) + list(P('K_rot').value))
+        node.get_logger().info(f'[{side}] role={role} K_pos={list(K_pos)}')
         self.q_nom = None          # 영공간 자세 목표 (켤 때 자세)
         self.xd = None             # (p_d, R_d)
         self.traj = None           # (t0, T, p0, R0, pf, Rf)
@@ -106,6 +110,11 @@ class ImpedanceNode(Node):
         super().__init__('impedance_controller')
         d = self.declare_parameter
         d('robot', 'robot1'); d('sides', ['r'])
+        d('role', 'none')                             # none | leader | follower  (리더–팔로워 강성 차등)
+        d('leader_K_pos', [800.0, 800.0, 1000.0])     # gain_design 범위: K_xy ≤ 1500, K_z ≥ 490 (박스 자세)
+        d('follower_K_pos', [300.0, 300.0, 1000.0])
+        d('output', 'sim')                            # sim: Gazebo 토크 / dxl: 실물 DYNAMIXEL 전류(Goal Current raw)
+        d('motor_params', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'motor_params.yaml'))
         d('mode', 'task')                             # position: 팔은 현대 QP(위치) 그대로, 그리퍼만 / gravity: τ=g(q)만(T12) / task: [문서 #2]
         d('K_pos', [500.0, 500.0, 1000.0])            # [N/m]  x, y, z (base_link)
         d('K_rot', [30.0, 30.0, 30.0])                # [N·m/rad]  문서 #12: 위치·회전 K 단위 분리
@@ -124,13 +133,25 @@ class ImpedanceNode(Node):
         self.last_state = 0.0
         qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(String, f'/{self.robot}/robot_description', self.on_urdf, qos)
-        self.create_subscription(JointState, f'/sim/{self.robot}/joint_states', self.on_state, qos_profile_sensor_data)
+        state_topic = f'/sim/{self.robot}/joint_states' if self.get_parameter('output').value == 'sim' \
+            else f'/{self.robot}/joint_states'
+        self.create_subscription(JointState, state_topic, self.on_state, qos_profile_sensor_data)
         self.create_subscription(Bool, 'impedance/enable', self.on_enable, 10)
         self.create_subscription(String, 'impedance/mode', self.on_mode, 10)
         self.gripper = {}                                 # side → 위치 목표 [rad] (0 열림, 1.1 닫힘)
         for s in ('r', 'l'):
             self.create_subscription(Float64, f'impedance/{s}/gripper',
                                      lambda m, s=s: self.gripper.__setitem__(s, m.data), 10)
+        self.output = self.get_parameter('output').value
+        if self.output == 'dxl':
+            mp = yaml.safe_load(open(self.get_parameter('motor_params').value))
+            self.motor = {k: mp[k] for k in ('Kt_eff', 'raw_per_A', 'current_limit_raw')}
+            missing = [k for k, v in self.motor.items() if v is None or any(x is None for x in v)]
+            if missing:
+                raise RuntimeError(f'motor_params.yaml 값 없음 {missing} — 데이터시트·calib_kt.py로 채운 뒤 실행 (안전)')
+            self.motor = {k: np.array(v, dtype=float) for k, v in self.motor.items()}
+            self.pub_dxl = {s: self.create_publisher(Float64MultiArray, f'/{self.robot}/arm_{s}_effort_controller/commands', 1)
+                            for s in ('r', 'l')}
         self.pub = self.create_publisher(Actuators, f'/sim/{self.robot}/effort', 1)
         os.makedirs(self.get_parameter('log_dir').value, exist_ok=True)
         fn = os.path.join(self.get_parameter('log_dir').value, time.strftime('%m%d_%H%M%S') + f'_task_{self.robot}.csv')
@@ -148,6 +169,12 @@ class ImpedanceNode(Node):
                 a.xd = None              # 다시 켜면 그때 자세를 목표로
         self.enabled = msg.data
         self.get_logger().info(f'enable = {msg.data}')
+
+    def torque_to_current(self, tau):
+        """관절 토크 → 모터 전류 명령(Goal Current raw).  I[A] = τ / Kt_eff,  raw = I · raw_per_A,  전류 한계로 포화.
+        Kt_eff[N·m/A]는 감속비·효율 포함 관절 출력 기준 (MR 11.8: τ = Kt·G·η·I). 값은 motor_params.yaml(실측 보정)"""
+        raw = tau / self.motor['Kt_eff'] * self.motor['raw_per_A']
+        return np.clip(np.round(raw), -self.motor['current_limit_raw'], self.motor['current_limit_raw'])
 
     def on_mode(self, msg):
         if msg.data in ('position', 'gravity', 'task'):
@@ -235,6 +262,8 @@ class ImpedanceNode(Node):
                 tau_cmd = np.clip(tau_task + g_full[vi] + tau_null + tau_ff, -P('tau_max'), P('tau_max'))
             for k, idx in enumerate(a.cmd_idx):
                 out[idx] = float(tau_cmd[k])
+            if self.output == 'dxl':
+                self.pub_dxl[a.side].publish(Float64MultiArray(data=self.torque_to_current(tau_cmd).tolist()))
             # [문서 #11] 모니터링: F̂_ext = Λë + Dė + Ke (ë는 ė 차분 — 기록용)
             ddot = (edot - a.edot_prev) / dt if (dt > 0 and hasattr(a, 'edot_prev')) else np.zeros(6)
             a.edot_prev = edot
@@ -247,7 +276,8 @@ class ImpedanceNode(Node):
         cmd.header.stamp = self.get_clock().now().to_msg()
         cmd.normalized = out
         cmd.position = pos
-        self.pub.publish(cmd)
+        if self.output == 'sim':
+            self.pub.publish(cmd)
 
 
 def main():

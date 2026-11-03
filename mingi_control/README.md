@@ -71,3 +71,27 @@ cd ~/KW_Internship && source scripts/environment.bash && cd mingi_control
 - 손(EE) 기준 그리퍼 두께 → 실제 접촉 위치. 그래서 쥐는 힘은 **설정 δ가 아니라 로그의 F_cmd,y로 보고**
 - 외력은 link7 원점에 걸림(EE보다 0.215 m 위) → T4는 근사
 - Gazebo에는 관절 마찰·정지마찰이 없음 → 실물에서는 F̂_ext가 마찰만큼 틀림
+
+## 6. 파지 이후 테스트 (grasp_sequence 다음)
+
+전제: 두 로봇 impedance_node가 `mode:=position`으로 실행 중, 파지 완료. 깨끗한 셸 + `source scripts/environment.bash`.
+
+| 순서 | 명령 | 통과 기준 |
+|---|---|---|
+| 1 중력 보상 | `ros2 topic pub --once /robot1/impedance/mode std_msgs/msg/String "{data: gravity}"` (robot2도) | 10 s 손 처짐 작음 → `python3 analyze.py t12 <로그> --side r` |
+| 2 임피던스 전환 | `... "{data: task}"` | 전환 순간 튐·처짐 없음 (같은 t12로 `--t0 <전환 시각>`) |
+| 3 외력 | `python3 push.py --robot robot1 --side r --F 0 10 0` | e_ss ≈ −F/K (출력되는 analyze t4) |
+| 4 계단 | `python3 step.py --robot robot1 --side r --axis y --d 0.03` | 오버슈트 ≈ 0, T_s ≈ 5.8/ωn |
+| 5 리더–팔로워 | 노드를 `-p role:=leader`(robot1) / `-p role:=follower`(robot2)로 실행 → 3번 반복 | 같은 힘에 팔로워 xy 변위가 리더의 약 800/300배 |
+
+## 7. 실물 전류 제어 (표의 Current Control 4항목)
+
+| 항목 | 파일 | 상태 |
+|---|---|---|
+| DYNAMIXEL Current Control Mode | `real/setup_current_mode.py` — 팔 모터 Operating Mode 0 | 코드 완료, 실물 미검증 |
+| ROS 2 current command interface | 같은 스크립트 — effort 인터페이스 + arm_*_effort_controller (ROBOTIS 인터페이스가 effort → Goal Current) | 코드 완료, 실물 미검증 |
+| 토크 → 전류 변환 | `impedance_node.py` `torque_to_current`: I = τ/Kt_eff, raw = I·raw_per_A (MR 11.8) | 코드 완료. **Kt_eff·raw_per_A는 미확인** → `motor_params.yaml`이 비어 있으면 노드가 실행 거부 |
+| 전류·토크 한계 | `tau_max`(토크) + `current_limit_raw`(전류) 이중 포화 | 코드 완료 |
+| Kt 실측 보정 | `calib_kt.py` — 정지 자세에서 τ = g(q) = Kt·I 최소제곱 | 실물에서 실행 |
+
+실물 실행: `python3 impedance_node.py --ros-args -r __ns:=/robot1 -p robot:=robot1 -p "sides:=[r,l]" -p output:=dxl -p mode:=gravity`
