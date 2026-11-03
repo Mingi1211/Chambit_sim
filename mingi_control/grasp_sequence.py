@@ -16,11 +16,13 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pinocchio as pin
 import rclpy
 import yaml
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.time import Time
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from tf2_ros import Buffer, TransformListener
 from robotis_interfaces.msg import MoveL
@@ -39,7 +41,9 @@ ap.add_argument('--box_config', default=str(Path(__file__).resolve().parents[1] 
                 help='박스 및 손잡이 설정 YAML')
 ap.add_argument('--approach_distance', type=float, default=0.04, help='손잡이 앞에서 시작할 접근 거리 [m]')
 ap.add_argument('--tool_offset_x', type=float, default=0.0205,
-                help='end_effector 프레임에서 그리퍼 손가락 접촉면까지의 전방 오프셋 [m]')
+                help='base_link +x 방향 EE 목표 오프셋 [m]')
+ap.add_argument('--grasp_z_offset', type=float, default=0.023,
+                help='FK에서 확인한 닫힘축 중심 오차 보정 [m], base_link +z')
 ap.add_argument('--forward_step', type=float, default=0.02, help='전진 중간 확인 간격 [m]')
 ap.add_argument('--z_up', type=float, default=0.06, help='회전할 때 손잡이보다 위로 띄우는 높이')
 ap.add_argument('--squeeze', type=float, default=0.05, help='접촉 위치에서 더 닫는 양 [rad]')
@@ -86,7 +90,7 @@ def load_grasp_targets():
     protrude = float(handle['protrude'])
     width_y = float(handle['y'])
     center_z = float(handle.get('z', 0.0))
-    result = {}
+    result, handle_centers = {}, {}
     for robot_name in a.robots:
         robot = robots[robot_name]
         R_robot = rotation(float(robot.get('yaw', 0.0)))
@@ -102,10 +106,12 @@ def load_grasp_targets():
             local_y = local_y_sign * side_sign * width_y
             handle_offset = np.array([face_sign * (sx / 2 + protrude / 2), local_y, center_z])
             handle_world = box_center_world + R_box @ handle_offset
-            target = R_robot.T @ (handle_world - robot_world)
+            handle_center = R_robot.T @ (handle_world - robot_world)
+            target = handle_center.copy()
             # SG2 end_effector_link는 손가락 접촉면보다 뒤쪽에 있다.
             # RH-P12 URDF의 그리퍼 조립 오프셋과 손가락 mesh 끝에서 계산한 +20.5 mm를 적용.
             target[0] += a.tool_offset_x
+            target[2] += a.grasp_z_offset
             # 사용자 지정 좌표는 진단/수동 보정용이며, 기본은 형상에서 계산한다.
             if a.x_grasp is not None:
                 target[0] = a.x_grasp
@@ -114,10 +120,11 @@ def load_grasp_targets():
             if a.z is not None:
                 target[2] = a.z
             result[robot_name, side] = target
-    return result
+            handle_centers[robot_name, side] = handle_center
+    return result, handle_centers
 
 
-grasp_targets = load_grasp_targets()
+grasp_targets, handle_centers = load_grasp_targets()
 approach_targets = {
     key: target + np.array([-a.approach_distance, 0.0, 0.0])
     for key, target in grasp_targets.items()
@@ -125,18 +132,34 @@ approach_targets = {
 if a.x_pre is not None:
     for target in approach_targets.values():
         target[0] = a.x_pre
-hover_targets = {key: target + np.array([0.0, 0.0, a.z_up])
+# 안전 hover는 손잡이 중심보다 z_up만큼 위로 고정한다. 닫힘축 보정은
+# 접촉 높이에만 적용해야 안전 자세까지 불필요하게 높아져 IK가 막히지 않는다.
+hover_targets = {key: target + np.array([0.0, 0.0, a.z_up - a.grasp_z_offset])
                  for key, target in approach_targets.items()}
 
 rclpy.init()
 n = Node('grasp_sequence', parameter_overrides=[Parameter('use_sim_time', value=True)])
-state, adapter_ready = {}, {}
+state, sim_state, robot_models, adapter_ready = {}, {}, {}, {}
 tf_buffer = Buffer()
 tf_listener = TransformListener(tf_buffer, n)
 pub_goal, pub_grip, pub_mode = {}, {}, {}
+description_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                              reliability=ReliabilityPolicy.RELIABLE)
+
+
+def on_robot_description(msg, robot):
+    if robot not in robot_models:
+        robot_models[robot] = pin.buildModelFromXML(msg.data)
+
+
 for r in a.robots:
     n.create_subscription(JointState, f'/{r}/joint_states',
                           lambda m, r=r: state.__setitem__(r, dict(zip(m.name, m.position))), 10)
+    n.create_subscription(JointState, f'/sim/{r}/joint_states',
+                          lambda m, r=r: sim_state.__setitem__(r, m), qos_profile_sensor_data)
+    n.create_subscription(String, f'/{r}/robot_description',
+                          lambda m, r=r: on_robot_description(m, r),
+                          description_qos)
     n.create_subscription(DiagnosticArray, f'/{r}/status',
                           lambda m, r=r: adapter_ready.__setitem__(r, bool(m.status) and
                               m.status[0].level == DiagnosticStatus.OK and m.status[0].message == 'ready'), 10)
@@ -159,6 +182,46 @@ def ee(r, s):
     orientation = np.array([transform.rotation.x, transform.rotation.y,
                              transform.rotation.z, transform.rotation.w])
     return position, orientation
+
+
+def report_finger_alignment(r, s, stage):
+    """Pinocchio FK of both distal finger links vs the handle center, all in base_link."""
+    model = robot_models.get(r)
+    msg = sim_state.get(r)
+    if model is None or msg is None:
+        say(f'  FK 진단 생략 {r}/{s}/{stage}: robot_description 또는 /sim joint_states 없음')
+        return
+    q = pin.neutral(model)
+    qmap = {model.names[j]: model.joints[j].idx_q
+            for j in range(1, model.njoints) if model.joints[j].nq == 1}
+    for name, value in zip(msg.name, msg.position):
+        joint = name.split('::')[-1]
+        if joint in qmap:
+            q[qmap[joint]] = value
+    data = model.createData()
+    pin.forwardKinematics(model, data, q)
+    pin.updateFramePlacements(model, data)
+    base = handle_centers[r, s]
+    points = {}
+    for finger in ('r2', 'l2'):
+        frame_name = f'gripper_{s}_rh_p12_rn_{finger}'
+        fid = model.getFrameId(frame_name)
+        if fid >= len(model.frames):
+            say(f'  FK 진단 링크 없음: {frame_name}')
+            return
+        points[finger] = data.oMf[fid].translation.copy()
+    gap = points['l2'] - points['r2']
+    gap_norm = float(np.linalg.norm(gap))
+    axis = gap / max(gap_norm, 1e-9)
+    midpoint = (points['l2'] + points['r2']) / 2
+    delta = base - midpoint
+    along = float(np.dot(delta, axis))
+    across = delta - along * axis
+    near = min(points, key=lambda key: np.linalg.norm(points[key] - base))
+    say(f'  FK {r}/{s}/{stage} base_link m: r2={np.round(points["r2"], 4).tolist()} '
+        f'l2={np.round(points["l2"], 4).tolist()} handle={np.round(base, 4).tolist()}')
+    say(f'    손가락 간격={gap_norm*1000:.1f} mm, handle-mid={np.round(delta*1000,1)} mm '
+        f'(닫힘축 {along*1000:+.1f} mm, 직교 {np.round(across*1000,1)} mm), 먼저 닿을 쪽 추정={near}')
 
 
 def move(targets, T, tries=8, tol=0.01, angle_tol=0.05, orientations=None):
@@ -303,6 +366,20 @@ while True:
     if time.monotonic() - wait_started > 60.0:
         raise RuntimeError(f'60초 안에 로봇 상태/TF/어댑터 준비가 완료되지 않았습니다. 상태: {list(state)}, 어댑터 준비: {adapter_ready}')
     spin(0.2)
+spin(0.5)
+graph = n.get_node_names_and_namespaces()
+duplicate_controllers = {
+    r: sum(name == 'impedance_controller' and namespace.rstrip('/') == f'/{r}'
+           for name, namespace in graph)
+    for r in a.robots
+}
+bad_controllers = {r: count for r, count in duplicate_controllers.items() if count != 1}
+if bad_controllers:
+    say(f'impedance_node는 로봇마다 정확히 하나여야 합니다: {bad_controllers}. '
+        '터미널 clear는 프로세스를 종료하지 않습니다. 기존 노드를 Ctrl+C로 끝낸 뒤 robot당 하나만 실행하세요.')
+    n.destroy_node()
+    rclpy.shutdown()
+    raise SystemExit(1)
 say('Gazebo 박스 실측 pose 기준으로 계산한 손잡이 중심 (각 base_link, m): ' + ' '.join(
     f'{r}/{s}={np.round(p, 4).tolist()}' for (r, s), p in grasp_targets.items()))
 for r in a.robots:
@@ -311,11 +388,15 @@ for r in a.robots:
 say('1 그리퍼 열기'); grip({k: OPEN for k in pub_grip}); spin(1.5)
 current_orientations = {k: ee(*k)[1] for k in pub_goal}
 say('2a 현재 손 방향을 유지하며 손잡이 위 안전 위치로 이동: ' + str({k: np.round(v, 3).tolist() for k, v in hover_targets.items()}))
-if not move(hover_targets, 5, orientations=current_orientations):
+current_positions = {k: ee(*k)[0] for k in pub_goal}
+hover_midpoints = {k: (current_positions[k] + hover_targets[k]) / 2 for k in pub_goal}
+if not move(hover_midpoints, 5, tries=12, orientations=current_orientations):
+    say('중간 안전 waypoint 오차가 남아 이후 이동을 중단합니다'); raise SystemExit(1)
+if not move(hover_targets, 5, tries=12, orientations=current_orientations):
     say('안전 접근 자세가 목표 오차 안에 들지 않아 하강을 중단합니다'); raise SystemExit(1)
 say('2b 안전 높이에서 손잡이 파지 방향으로 회전')
 grasp_orientations = {k: QUAT for k in pub_goal}
-if not move(hover_targets, 5, tol=0.03, angle_tol=0.10, orientations=grasp_orientations):
+if not move(hover_targets, 5, tries=12, tol=0.03, angle_tol=0.10, orientations=grasp_orientations):
     say('안전 높이에서 파지 방향을 맞추지 못해 하강을 중단합니다'); raise SystemExit(1)
 rotated_positions = {k: ee(*k)[0] for k in pub_goal}
 approach_targets = {
@@ -332,6 +413,8 @@ if not spacing_ok():
 say(f'3 손잡이 중심까지 x 방향으로만 천천히 전진, 구간 간격 ≤{a.forward_step*1000:.0f} mm')
 if not move_forward(4):
     say('정렬/전진 검증 실패 — 그리퍼를 닫지 않고 중단'); raise SystemExit(1)
+for r, s in pub_goal:
+    report_finger_alignment(r, s, '닫기 직전')
 missing_grippers = [f'{r}/{s}' for (r, s), pub in pub_grip.items() if pub.get_subscription_count() == 0]
 if missing_grippers:
     say(f'그리퍼 명령을 받을 현대 impedance_controller가 없습니다: {missing_grippers} — 해당 로봇의 impedance_node를 시작한 뒤 다시 실행하세요')
@@ -355,6 +438,8 @@ miss = [k for k, q in contact.items() if q >= CLOSED - 0.1] + [k for k in pub_gr
 if miss:
     say(f'파지 실패 {miss} — 손잡이 위치와 --tool_offset_x를 확인하세요. 토크 전환 안 함')
 else:
+    for r, s in pub_grip:
+        report_finger_alignment(r, s, f'접촉 q={contact[r, s]:.3f}')
     grip({k: q + a.squeeze for k, q in contact.items()})       # 접촉 위치 + 조금 더 → 쥐는 힘 제한
     spin(1.0)
     say('5 고정 완료 → 6 토크(임피던스) 모드 전환')
