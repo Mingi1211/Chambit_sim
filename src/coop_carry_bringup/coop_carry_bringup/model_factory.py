@@ -28,6 +28,7 @@ def read_robots(path):
         # [문서 밖] 김민기: position(현대 기본) | effort(토크 경로 추가, 임피던스 제어용)
         robot['control_mode'] = config.get('control_mode', 'position')
         robot['state_rate'] = int(config.get('state_rate', 100))
+        robot['gripper_effort'] = float(config.get('gripper_effort', 5.0))
         if not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9_]*', robot['name']):
             raise ValueError(f"Invalid robot namespace: {robot['name']}")
         for key in ('x', 'y', 'z', 'yaw'):

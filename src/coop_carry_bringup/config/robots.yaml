@@ -17,8 +17,8 @@ state_rate: 500                    # effort 모드 관절 상태·토크 루프 
 box:
   robot: robot1
   center_base: [0.55, 0.0, 0.85]   # robot1 base_link 기준 = 월드 원점 위
-  size: [0.50, 0.30, 0.15]         # x(두 로봇 방향) y(옆면 사이) z [m]
+  size: [0.50, 0.66, 0.15]         # x(두 로봇 방향) y(옆면 사이) z [m]; 파지 자세 손 간격에 여유를 더함
   mass: 2.0                        # [kg] 두 로봇이 나눠 듦
   mu: 1.0
-  handle: {y: 0.12, protrude: 0.05, width: 0.08, thickness: 0.030}   # 양 끝면 수평 손잡이(로봇당 2개). 두께 30 mm → 손가락 접촉 q≈0.85 (간격 실측: q 0.8=36, 0.9=25 mm)
-  table_size: [0.30, 0.18]         # 받침대: 두 베이스 앞부분(±0.27) 사이, 손(y ±0.23) 안쪽
+  handle: {y: 0.276, protrude: 0.05, width: 0.08, thickness: 0.030} # 손잡이 중심 간격 0.552 m; 박스 y 반폭 0.33 m 안에 배치
+  table_size: [0.30, 0.40]         # 박스 아래 중앙 받침대

@@ -5,7 +5,7 @@
 2 들기 +lift (5차 궤적, MR 9.2)   3 유지
 4 리더–팔로워 [문서 #7]: 리더(robot1)만 목표를 옆(월드 y)으로 shift. 팔로워 K_xy 부드럽게 → 단단하게 두 번
   예측(직렬 스프링, 마찰 무시): 박스 이동 = shift·K_L/(K_L+K_F),  손당 내력 ≈ K_F·(박스 이동)
-5 리더 복귀 → 내리기 → 피드포워드 끄기 → 그리퍼 열기
+5 리더 복귀 → 내리기 → 피드포워드 끄기 → 그리퍼 열기 → 6 위치 제어 복귀
 평가: 노드 로그의 F_cmd(내력), Gazebo 박스 위치는 기록용
 
 사용: python3 carry_scenario.py [--lift 0.05] [--shift 0.05] [--hold 10] [--box_mass 2.0]
@@ -20,7 +20,7 @@ import time
 import rclpy
 from geometry_msgs.msg import Vector3
 from rclpy.node import Node
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, String
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--leader', default='robot1')
@@ -108,6 +108,12 @@ step('  피드포워드 끄기', 2.0)
 for r in robots:
     put(r, 'gripper', 0.0)
 step('  그리퍼 열기', 2.0)
+# 놓은 뒤에는 상위 위치 제어(현대 QP)로 복귀 — 박스 질량이 빠지면 가벼운 손목이 불안정해지는 문제(11/4 확인, 원인 분석 중)
+mode_pub = {r: n.create_publisher(String, f'/{r}/impedance/mode', 10) for r in robots}
+time.sleep(0.5)
+for r in robots:
+    mode_pub[r].publish(String(data='position'))
+step('6 위치 제어로 복귀', 1.0)
 stop.set()
 th.join()
 open(ev_log, 'w').write('name,t\n' + ''.join(f'{k},{t:.3f}\n' for k, t in events))

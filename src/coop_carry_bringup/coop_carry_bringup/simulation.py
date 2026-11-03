@@ -26,6 +26,12 @@ def generate_robot(robot, runtime):
                     group.remove(plugin)
 
     joints = [j for j in original.findall('joint') if j.get('type') != 'fixed']
+    if robot.get('control_mode') == 'effort':
+        # [문서 밖] 그리퍼 쥐는 힘 제한: Gazebo 위치 서보는 관절 effort 한계까지 밀어붙임(URDF 1000) → 손잡이에 파고들어
+        # 접촉 계산 폭주(RTF 0.007, 11/3 확인). 물리 모델에서만 그리퍼 관절 effort 한계를 낮춤
+        for j in physics.findall('joint'):
+            if j.get('name', '').startswith('gripper_') and j.find('limit') is not None:
+                j.find('limit').set('effort', str(robot.get('gripper_effort', 5.0)))
     commanded = []
     config = yaml.safe_load(controllers.read_text())
     for controller in ('arm_r_controller', 'arm_l_controller'):
