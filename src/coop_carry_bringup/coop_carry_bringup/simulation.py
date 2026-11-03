@@ -46,6 +46,12 @@ def generate_robot(robot, runtime):
     for key, value in {'command_topic': f'/sim/{name}/actuators', 'command_timeout': '0.5',
                        'position_gain': '10.0', 'command_count': str(len(commanded))}.items():
         ET.SubElement(actuator, key).text = value
+    effort = robot.get('control_mode', 'position') == 'effort'
+    if effort:
+        # [문서 밖] 토크 명령 경로: /sim/<robot>/effort (Actuators.normalized = 관절 토크, NaN = 위치 서보 유지)
+        for key, value in {'effort_topic': f'/sim/{name}/effort', 'effort_timeout': '0.1',
+                           'effort_limit': '60.0'}.items():
+            ET.SubElement(actuator, key).text = value
     for joint in joints:
         joint_name = joint.get('name')
         limit = joint.find('limit')
@@ -75,7 +81,8 @@ def generate_robot(robot, runtime):
         'filename': 'gz-sim-joint-state-publisher-system',
         'name': 'gz::sim::systems::JointStatePublisher'})
     ET.SubElement(publisher, 'topic').text = f'/sim/{name}/joint_states'
-    ET.SubElement(publisher, 'update_rate').text = '100'
+    # [문서 밖] effort 모드: 상태 주기 = 토크 루프 주기. 문서 #8 감쇠 상한 D < 2Λ/T 때문에 T를 줄일 수 있게 설정값으로
+    ET.SubElement(publisher, 'update_rate').text = str(robot.get('state_rate', 100) if effort else 100)
     physics_path = runtime / name / 'physics.urdf'
     control_path = runtime / name / 'control.urdf'
     write_xml(physics, physics_path)
@@ -85,10 +92,52 @@ def generate_robot(robot, runtime):
     bridge = []
     for topic, ros_type, gz_type, direction in [
         (f'/sim/{name}/joint_states', 'sensor_msgs/msg/JointState', 'gz.msgs.Model', 'GZ_TO_ROS'),
-        (f'/sim/{name}/actuators', 'actuator_msgs/msg/Actuators', 'gz.msgs.Actuators', 'ROS_TO_GZ')]:
+        (f'/sim/{name}/actuators', 'actuator_msgs/msg/Actuators', 'gz.msgs.Actuators', 'ROS_TO_GZ')] + (
+        [(f'/sim/{name}/effort', 'actuator_msgs/msg/Actuators', 'gz.msgs.Actuators', 'ROS_TO_GZ')] if effort else []):
         bridge.append(dict(ros_topic_name=topic, gz_topic_name=topic, ros_type_name=ros_type,
                            gz_type_name=gz_type, direction=direction))
     return bridge
+
+
+def configure_effort_world(world, robots_file):
+    """[문서 밖] 김민기: 토크 제어용 월드 설정.
+    ① 물리 간격 10 ms → 1 ms (10 ms에서는 토크 루프가 지연으로 진동 — 10/28 확인)
+    ② ApplyLinkWrench: 시험용 외력 입력(실물의 무게추 걸기에 해당, 센서 아님)
+    ③ 박스·받침대 (robots.yaml의 box 절)"""
+    physics = world.find('physics')
+    physics.find('max_step_size').text = '0.001'
+    physics.find('real_time_update_rate').text = '1000'
+    ET.SubElement(world, 'plugin', {'name': 'gz::sim::systems::ApplyLinkWrench',
+                                    'filename': 'gz-sim-apply-link-wrench-system'})
+    config = yaml.safe_load(Path(robots_file).read_text())
+    box = config.get('box')
+    if not box:
+        return
+    base = next(r for r in config['robots'] if r['name'] == box['robot'])
+    yaw = float(base.get('yaw', 0.0))
+    import math
+    bx, by, bz = box['center_base']                      # 로봇 base_link 기준 박스 중심
+    wx = base['x'] + math.cos(yaw) * bx - math.sin(yaw) * by
+    wy = base['y'] + math.sin(yaw) * bx + math.cos(yaw) * by
+    wz = base['z'] + bz
+    sx, sy, sz = box['size']
+    m, mu = float(box['mass']), float(box['mu'])
+    ixx, iyy, izz = m * (sy**2 + sz**2) / 12, m * (sx**2 + sz**2) / 12, m * (sx**2 + sy**2) / 12
+    surface = f"<surface><friction><ode><mu>{mu}</mu><mu2>{mu}</mu2></ode></friction></surface>"
+    world.append(ET.fromstring(f"""<model name='box'><pose>{wx} {wy} {wz} 0 0 {yaw}</pose><link name='link'>
+      <inertial><mass>{m}</mass><inertia><ixx>{ixx}</ixx><iyy>{iyy}</iyy><izz>{izz}</izz>
+      <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
+      <collision name='c'><geometry><box><size>{sx} {sy} {sz}</size></box></geometry>{surface}</collision>
+      <visual name='v'><geometry><box><size>{sx} {sy} {sz}</size></box></geometry>
+      <material><ambient>0.8 0.5 0.2 1</ambient><diffuse>0.8 0.5 0.2 1</diffuse></material></visual>
+      </link></model>"""))
+    th = wz - sz / 2                                      # 받침대 윗면 = 박스 바닥
+    tw = box.get('table_size', [sx, 0.6 * sy])
+    world.append(ET.fromstring(f"""<model name='table'><static>true</static>
+      <pose>{wx} {wy} {th / 2} 0 0 {yaw}</pose><link name='link'>
+      <collision name='c'><geometry><box><size>{tw[0]} {tw[1]} {th}</size></box></geometry>{surface}</collision>
+      <visual name='v'><geometry><box><size>{tw[0]} {tw[1]} {th}</size></box></geometry></visual>
+      </link></model>"""))
 
 
 def generate_simulation(runtime, robots_file):
@@ -106,6 +155,8 @@ def generate_simulation(runtime, robots_file):
     for plugin in list(world.find('world').findall('plugin')):
         if plugin.get('name') == 'gz::sim::systems::Sensors':
             world.find('world').remove(plugin)
+    if any(r.get('control_mode') == 'effort' for r in robots):
+        configure_effort_world(world.find('world'), robots_file)
     write_xml(world, runtime / 'world.sdf')
     (runtime / 'ready').write_text('robot1 robot2\n')
     return robots

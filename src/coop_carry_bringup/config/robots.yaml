@@ -9,3 +9,13 @@ initial_joint_positions:
 robots:
   - {name: robot1, x: 0.0, y: -0.9, z: 0.2, yaw: 0.0}
   - {name: robot2, x: 0.0, y: 0.9, z: 0.2, yaw: 0.0}
+# --- 김민기 하위 제어 (토크 임피던스) ---------------------------------------
+# position: 현대 기본(위치 서보만) / effort: 토크 경로 + 물리 1 ms + 외력 시험 플러그인 + 박스
+control_mode: effort
+state_rate: 500                    # effort 모드 관절 상태·토크 루프 주기 [Hz] (문서 #8: D < 2Λ/T)
+box:
+  robot: robot1
+  center_base: [0.40, 0.0, 0.85]   # robot1 base_link 기준 박스 중심 [m] (현대 MoveL 시험 자세 근처)
+  size: [0.20, 0.30, 0.15]         # x(앞뒤) y(양손 사이) z [m]
+  mass: 1.0                        # [kg]
+  mu: 1.0                          # 손-박스 마찰계수(시뮬 설정값)

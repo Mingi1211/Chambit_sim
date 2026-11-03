@@ -1,0 +1,5 @@
+# 현대 QP(위치 제어)로 박스 옆까지 접근 — robot1 base_link 기준. 박스 중심 (0.40, 0, 0.85), 폭 y 0.30
+# 손을 박스 옆면(y=±0.15)에서 8 cm 바깥에 둔다 (그리퍼 두께 여유). 자세 = 현대 MoveL 시험과 같은 단위 쿼터니언
+goals:
+  - {robot: robot1, arm: r, position: [0.40, -0.23, 0.85], orientation: [0.0, 0.0, 0.0, 1.0], duration: 4.0}
+  - {robot: robot1, arm: l, position: [0.40, 0.23, 0.85], orientation: [0.0, 0.0, 0.0, 1.0], duration: 4.0}
