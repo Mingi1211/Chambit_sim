@@ -10,19 +10,23 @@
 import argparse
 import time
 
+import numpy as np
+import pinocchio as pin
 import rclpy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from robotis_interfaces.msg import MoveL
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64, String
+from std_msgs.msg import String as Urdf
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--robots', nargs='+', default=['robot1', 'robot2'])
 ap.add_argument('--y', type=float, default=0.12, help='손잡이 y (base_link)')
 ap.add_argument('--z', type=float, default=0.85, help='손잡이 높이 (base_link)')
 ap.add_argument('--x_pre', type=float, default=0.18, help='접근 자세 손끝 x')
-ap.add_argument('--x_grasp', type=float, default=0.29, help='파지 손끝 x (박스 끝면 0.30 바로 앞)')
+ap.add_argument('--x_grasp', type=float, default=0.285, help='파지 손끝 x (박스 끝면 0.30 바로 앞)')
 ap.add_argument('--squeeze', type=float, default=0.05, help='접촉 위치에서 더 닫는 양 [rad]')
 a = ap.parse_args()
 QUAT = (-0.5, -0.5, 0.5, 0.5)       # 손끝이 +x(박스 쪽), 손가락은 상하로 닫힘 — 두 팔 모두 IK 도달 확인
@@ -30,12 +34,14 @@ OPEN, CLOSED = 0.0, 1.1
 
 rclpy.init()
 n = Node('grasp_sequence')
-state = {}
+state, models = {}, {}
 pub_goal, pub_grip, pub_mode = {}, {}, {}
 for r in a.robots:
     n.create_subscription(JointState, f'/sim/{r}/joint_states',
                           lambda m, r=r: state.__setitem__(r, dict(zip(m.name, m.position))), qos_profile_sensor_data)
     pub_mode[r] = n.create_publisher(String, f'/{r}/impedance/mode', 10)
+    n.create_subscription(Urdf, f'/{r}/robot_description', lambda m, r=r: models.setdefault(r, pin.buildModelFromXML(m.data)),
+                          QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE))
     for s in 'rl':
         pub_goal[r, s] = n.create_publisher(MoveL, f'/{r}/{s}_goal_move', 10)
         pub_grip[r, s] = n.create_publisher(Float64, f'/{r}/impedance/{s}/gripper', 10)
@@ -47,11 +53,38 @@ def spin(sec):
         rclpy.spin_once(n, timeout_sec=0.01)
 
 
-def move(x, T):
+def ee(r, s):
+    """실제 손 위치(base_link) = 관절 상태 → FK"""
+    m = models[r]
+    d = m.createData()
+    q = pin.neutral(m)
+    for k, v in state[r].items():
+        if m.existJointName(k) and m.joints[m.getJointId(k)].nq == 1:
+            q[m.joints[m.getJointId(k)].idx_q] = v
+    pin.framesForwardKinematics(m, d, q)
+    return d.oMf[m.getFrameId(f'end_effector_{s}_link')].translation.copy()
+
+
+def move(x, T, tries=3, tol=0.005):
+    """현대 QP에 목표 전송 → 실제 위치 측정 → 오차만큼 목표 보정해 재전송 (QP 정상오차 보상)"""
+    want = {k: np.array([x, -a.y if k[1] == 'r' else a.y, a.z]) for k in pub_goal}
+    cmd = {k: v.copy() for k, v in want.items()}
+    for i in range(tries):
+        send(cmd, T if i == 0 else 2)
+        err = {k: want[k] - ee(*k) for k in want}
+        worst = max(np.linalg.norm(e) for e in err.values())
+        say(f'  위치 오차 최대 {worst*1000:.1f} mm ' + ' '.join(f'{k[0][-1]}{k[1]}:{np.round(e*1000,0)}' for k, e in err.items()))
+        if worst < tol:
+            return
+        for k in cmd:
+            cmd[k] += err[k]
+
+
+def send(cmd, T):
     for (r, s), p in pub_goal.items():
         g = MoveL()
         g.pose.header.frame_id = 'base_link'
-        g.pose.pose.position.x, g.pose.pose.position.y, g.pose.pose.position.z = x, (-a.y if s == 'r' else a.y), a.z
+        g.pose.pose.position.x, g.pose.pose.position.y, g.pose.pose.position.z = cmd[r, s]
         g.pose.pose.orientation.x, g.pose.pose.orientation.y, g.pose.pose.orientation.z, g.pose.pose.orientation.w = QUAT
         g.time_from_start.sec = int(T)
         p.publish(g)
@@ -68,6 +101,8 @@ def say(msg):
 
 
 spin(1.5)                                                   # 탐색 대기
+while len(models) < len(a.robots) or len(state) < len(a.robots):
+    spin(0.2)
 for r in a.robots:
     pub_mode[r].publish(String(data='position'))
 say('1 그리퍼 열기'); grip({k: OPEN for k in pub_grip}); spin(1.5)
