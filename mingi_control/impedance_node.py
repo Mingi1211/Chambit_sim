@@ -106,7 +106,7 @@ class ImpedanceNode(Node):
         super().__init__('impedance_controller')
         d = self.declare_parameter
         d('robot', 'robot1'); d('sides', ['r'])
-        d('mode', 'task')                             # task: [문서 #2] 전체 / gravity: τ = g(q)만 (T12 중력 부호 검증)
+        d('mode', 'task')                             # position: 팔은 현대 QP(위치) 그대로, 그리퍼만 / gravity: τ=g(q)만(T12) / task: [문서 #2]
         d('K_pos', [500.0, 500.0, 1000.0])            # [N/m]  x, y, z (base_link)
         d('K_rot', [30.0, 30.0, 30.0])                # [N·m/rad]  문서 #12: 위치·회전 K 단위 분리
         d('zeta', 1.0)                                # 문서 #5: ζ=1로 시작
@@ -126,6 +126,11 @@ class ImpedanceNode(Node):
         self.create_subscription(String, f'/{self.robot}/robot_description', self.on_urdf, qos)
         self.create_subscription(JointState, f'/sim/{self.robot}/joint_states', self.on_state, qos_profile_sensor_data)
         self.create_subscription(Bool, 'impedance/enable', self.on_enable, 10)
+        self.create_subscription(String, 'impedance/mode', self.on_mode, 10)
+        self.gripper = {}                                 # side → 위치 목표 [rad] (0 열림, 1.1 닫힘)
+        for s in ('r', 'l'):
+            self.create_subscription(Float64, f'impedance/{s}/gripper',
+                                     lambda m, s=s: self.gripper.__setitem__(s, m.data), 10)
         self.pub = self.create_publisher(Actuators, f'/sim/{self.robot}/effort', 1)
         os.makedirs(self.get_parameter('log_dir').value, exist_ok=True)
         fn = os.path.join(self.get_parameter('log_dir').value, time.strftime('%m%d_%H%M%S') + f'_task_{self.robot}.csv')
@@ -143,6 +148,11 @@ class ImpedanceNode(Node):
                 a.xd = None              # 다시 켜면 그때 자세를 목표로
         self.enabled = msg.data
         self.get_logger().info(f'enable = {msg.data}')
+
+    def on_mode(self, msg):
+        if msg.data in ('position', 'gravity', 'task'):
+            self.set_parameters([rclpy.parameter.Parameter('mode', value=msg.data)])
+            self.get_logger().info(f'mode = {msg.data}')
 
     def on_urdf(self, msg):
         if self.model is not None:
@@ -179,7 +189,14 @@ class ImpedanceNode(Node):
         M_full = pin.crba(m, d, q)
         M_full = np.triu(M_full) + np.triu(M_full, 1).T
         out = [math.nan] * len(COMMANDED)
+        pos = [math.nan] * len(COMMANDED)
+        for s, v in self.gripper.items():
+            pos[COMMANDED.index(f'gripper_{s}_joint1')] = v
+        mode = self.get_parameter('mode').value
         for a in self.arms:
+            if mode == 'position':                              # 토크 전환 전: 팔 NaN → 현대 QP 위치 서보
+                a.xd = None
+                continue
             vi = a.vi
             qa, dqa = q[a.qi], v[vi]
             oMf = d.oMf[a.fid]
@@ -212,7 +229,7 @@ class ImpedanceNode(Node):
             a.m_ff_now += float(np.clip(a.m_ff - a.m_ff_now, -step * max(a.m_ff, a.m_ff_now, 1e-9), step * max(a.m_ff, a.m_ff_now, 1e-9)))
             tau_ff = J[:3].T @ np.array([0.0, 0.0, a.m_ff_now * G / 2])
             # [문서 #2] τ_cmd = τ_task + g + τ_null (+ 피드포워드), 포화
-            if self.get_parameter('mode').value == 'gravity':
+            if mode == 'gravity':
                 tau_cmd = np.clip(g_full[vi], -P('tau_max'), P('tau_max'))     # [T12] g(q)만 → 팔이 떠 있어야 함
             else:
                 tau_cmd = np.clip(tau_task + g_full[vi] + tau_null + tau_ff, -P('tau_max'), P('tau_max'))
@@ -229,6 +246,7 @@ class ImpedanceNode(Node):
         cmd = Actuators()
         cmd.header.stamp = self.get_clock().now().to_msg()
         cmd.normalized = out
+        cmd.position = pos
         self.pub.publish(cmd)
 
 

@@ -65,6 +65,9 @@ public:
     if (msg.normalized_size() != static_cast<int>(count_)) {return;}
     std::lock_guard<std::mutex> lock(mutex_);
     effort_.assign(msg.normalized().begin(), msg.normalized().end());
+    // position[i]이 숫자면 그 관절(그리퍼) 위치 목표를 덮어씀 — 그리퍼 열기·닫기
+    override_.assign(count_, std::nan(""));
+    if (msg.position_size() == static_cast<int>(count_)) {override_.assign(msg.position().begin(), msg.position().end());}
     effort_received_ = std::chrono::steady_clock::now();
   }
   void OnCommand(const gz::msgs::Actuators & msg)
@@ -79,7 +82,7 @@ public:
   void PreUpdate(const gz::sim::UpdateInfo & info, gz::sim::EntityComponentManager & ecm) override
   {
     if (info.paused) {return;}
-    std::vector<double> command, effort;
+    std::vector<double> command, effort, override;
     bool live, effort_live;
     {
       std::lock_guard<std::mutex> lock(mutex_);
@@ -91,6 +94,7 @@ public:
       effort_live = effort_.size() == count_ &&
         std::chrono::duration<double>(std::chrono::steady_clock::now() - effort_received_).count() < effort_timeout_;
       effort = effort_;
+      override = override_;
     }
     if (was_live_ && !live) {
       for (auto & joint : joints_) {
@@ -127,6 +131,10 @@ public:
         std::abs(command[joint.command_index] - joint.command_at_release) > 1e-3) {joint.release_hold = false;}
       double target = joint.hold;
       if (live && joint.command_index >= 0 && !joint.release_hold) {target = command[joint.command_index];}
+      if (effort_live && joint.command_index >= 0 && std::isfinite(override[joint.command_index])) {
+        target = override[joint.command_index];
+        joint.hold = target;
+      }
       if (joint.mimic_index >= 0) {
         auto source = ecm.Component<gz::sim::components::JointPosition>(joints_[joint.mimic_index].entity);
         if (source && !source->Data().empty()) {target = source->Data()[0];}
@@ -149,7 +157,7 @@ private:
   unsigned int count_ = 0;
   double timeout_ = 0.5, gain_ = 10.0, command_stamp_ = 0.0;
   bool was_live_ = false;
-  std::vector<double> effort_;
+  std::vector<double> effort_, override_;
   std::chrono::steady_clock::time_point effort_received_;
   double effort_timeout_ = 0.1, effort_limit_ = 60.0;
 };

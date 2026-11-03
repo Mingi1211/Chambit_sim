@@ -99,6 +99,19 @@ def generate_robot(robot, runtime):
     return bridge
 
 
+def handles(box, sx, surface):
+    """양 끝면(로봇 쪽)에 수평 손잡이 4개 — 그리퍼(앞을 향함, 손가락 상하로 닫힘)가 집는다"""
+    h = box.get('handle')
+    if not h:
+        return ''
+    out, (p, w, t) = [], (h['protrude'], h['width'], h['thickness'])
+    for i, (sx_sign, y) in enumerate([(s, y) for s in (-1, 1) for y in (-h['y'], h['y'])]):
+        x = sx_sign * (sx / 2 + p / 2)
+        geo = f"<pose>{x} {y} {h.get('z', 0.0)} 0 0 0</pose><geometry><box><size>{p} {w} {t}</size></box></geometry>"
+        out.append(f"<collision name='h{i}'>{geo}{surface}</collision><visual name='hv{i}'>{geo}</visual>")
+    return ''.join(out)
+
+
 def configure_effort_world(world, robots_file):
     """[문서 밖] 김민기: 토크 제어용 월드 설정.
     ① 물리 간격 10 ms → 1 ms (10 ms에서는 토크 루프가 지연으로 진동 — 10/28 확인)
@@ -130,7 +143,7 @@ def configure_effort_world(world, robots_file):
       <collision name='c'><geometry><box><size>{sx} {sy} {sz}</size></box></geometry>{surface}</collision>
       <visual name='v'><geometry><box><size>{sx} {sy} {sz}</size></box></geometry>
       <material><ambient>0.8 0.5 0.2 1</ambient><diffuse>0.8 0.5 0.2 1</diffuse></material></visual>
-      </link></model>"""))
+      {handles(box, sx, surface)}</link></model>"""))
     th = wz - sz / 2                                      # 받침대 윗면 = 박스 바닥
     tw = box.get('table_size', [sx, 0.6 * sy])
     world.append(ET.fromstring(f"""<model name='table'><static>true</static>
