@@ -10,6 +10,7 @@
 import argparse
 import csv
 import math
+import os
 
 import matplotlib
 matplotlib.use('Agg')                      # 화면 없이 PNG만 저장 (Authorization 경고 방지)
@@ -131,9 +132,44 @@ def box(a):
     print('그래프 저장:', a.log.replace('.csv', '_box.png'))
 
 
+def carry(a):
+    """운반 시나리오: 단계별 박스 위치(기록용)·손 z 처짐·손 힘(F_cmd). 노드 로그는 같은 시각대 최신 것을 자동 선택"""
+    import glob
+    B = np.genfromtxt(a.log, delimiter=',', names=True)
+    ev = [(r['name'], float(r['t'])) for r in csv.DictReader(open(a.log.replace('_box.csv', '_events.csv')))]
+    T = dict((k.split()[0], t) for k, t in ev)
+    logs = {r: sorted(glob.glob(os.path.expanduser(f'~/impedance_logs/*_task_{r}.csv')))[-1] for r in ('robot1', 'robot2')}
+    D = {(r, s): load(p, s) for r, p in logs.items() for s in 'rl'}
+    t0 = ev[0][1]
+    win = lambda L, a0, a1: (L['t'] > a0) & (L['t'] < a1)  # noqa: E731
+    print('== 단계별 (손 4개 평균)')
+    marks = [t for _, t in ev] + [ev[-1][1] + 2]
+    for (name, ta), tb in zip(ev, marks[1:]):
+        ez = np.mean([D[k]['ez'][win(D[k], tb - 1.0, tb)].mean() for k in D]) * 1000
+        fy = {r: np.mean([np.abs(D[r, s]['Fy'][win(D[r, s], tb - 1.0, tb)]).mean() for s in 'rl']) for r in ('robot1', 'robot2')}
+        bw = (B['t'] > tb - 1.0) & (B['t'] < tb)
+        by, bz = (B['y'][bw].mean() - B['y'][0]) * 100, (B['z'][bw].mean() - B['z'][0]) * 100
+        print(f'  {name:32s} 손 z오차 {ez:5.1f} mm | |F_y| 리더 {fy["robot1"]:5.1f} N, 팔로워 {fy["robot2"]:5.1f} N | 박스 Δy {by:5.1f} cm, Δz {bz:5.1f} cm')
+    fig, ax = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+    for (r, s), L in D.items():
+        ax[0].plot(L['t'] - t0, L['Fy'], label=f'{r}/{s} F_y')
+        ax[1].plot(L['t'] - t0, L['ez'] * 1000, label=f'{r}/{s} e_z')
+    ax[2].plot(B['t'] - t0, (B['y'] - B['y'][0]) * 100, label='박스 Δy [cm]')
+    ax[2].plot(B['t'] - t0, (B['z'] - B['z'][0]) * 100, label='박스 Δz [cm]')
+    ax[0].set_ylabel('F_cmd,y [N] (내력)'); ax[1].set_ylabel('손 z 오차 [mm]'); ax[2].set_ylabel('[cm]'); ax[2].set_xlabel('t [s]')
+    for x in ax:
+        for name, t in ev:
+            x.axvline(t - t0, color='gray', lw=0.5)
+        x.legend(fontsize=7)
+    for name, t in ev:
+        ax[0].text(t - t0, ax[0].get_ylim()[1] * 0.85, name.split()[0], fontsize=8)
+    out = a.log.replace('_box.csv', '.png')
+    fig.tight_layout(); fig.savefig(out, dpi=120); print('그래프:', out)
+
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('kind', choices=['t12', 't4', 't5', 'box'])
+    ap.add_argument('kind', choices=['t12', 't4', 't5', 'box', 'carry'])
     ap.add_argument('log')
     ap.add_argument('box_log', nargs='?')
     ap.add_argument('--side', default='r')
@@ -142,4 +178,4 @@ if __name__ == '__main__':
     ap.add_argument('--t_step', type=float); ap.add_argument('--axis', default='y')
     ap.add_argument('--t0', type=float, help='t12: 이 시각(로그 t)부터 처짐 계산')
     a = ap.parse_args()
-    {'t12': t12, 't4': t4, 't5': t5, 'box': box}[a.kind](a)
+    {'t12': t12, 't4': t4, 't5': t5, 'box': box, 'carry': carry}[a.kind](a)
