@@ -29,6 +29,7 @@ def read_robots(path):
         robot['control_mode'] = config.get('control_mode', 'position')
         robot['state_rate'] = int(config.get('state_rate', 100))
         robot['gripper_effort'] = float(config.get('gripper_effort', 5.0))
+        robot['base_motion'] = bool(config.get('base_motion', False))
         if not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9_]*', robot['name']):
             raise ValueError(f"Invalid robot namespace: {robot['name']}")
         for key in ('x', 'y', 'z', 'yaw'):

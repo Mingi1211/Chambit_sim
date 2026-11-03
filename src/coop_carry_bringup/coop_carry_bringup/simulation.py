@@ -58,6 +58,18 @@ def generate_robot(robot, runtime):
         for key, value in {'effort_topic': f'/sim/{name}/effort', 'effort_timeout': '0.1',
                            'effort_limit': '60.0'}.items():
             ET.SubElement(actuator, key).text = value
+    if effort and robot.get('base_motion'):
+        # [문서 밖] 베이스 이동 대역(실제 스워브 주행은 현대 파트): 물리 모델에서만 base_world_fixed → y 슬라이드 관절.
+        # 제어 모델(control.urdf)·Pinocchio는 그대로(팔은 모두 base_link 기준이라 순수 평행이동은 영향 없음)
+        bj = next(j for j in physics.findall('joint') if j.get('name') == 'base_world_fixed')
+        bj.set('type', 'prismatic')
+        ET.SubElement(bj, 'axis', {'xyz': '0 1 0'})
+        ET.SubElement(bj, 'limit', {'lower': '-5', 'upper': '5', 'effort': '100000', 'velocity': '1.0'})
+        base_def = ET.SubElement(actuator, 'joint')
+        for key, value in dict(name='base_world_fixed', initial=0.0, lower=-5.0, upper=5.0, velocity=1.0,
+                               command_index=-1, mimic_index=-1, base_index=0).items():
+            ET.SubElement(base_def, key).text = str(value)
+        ET.SubElement(actuator, 'base_topic').text = f'/sim/{name}/base'
     for joint in joints:
         joint_name = joint.get('name')
         limit = joint.find('limit')
@@ -99,7 +111,9 @@ def generate_robot(robot, runtime):
     for topic, ros_type, gz_type, direction in [
         (f'/sim/{name}/joint_states', 'sensor_msgs/msg/JointState', 'gz.msgs.Model', 'GZ_TO_ROS'),
         (f'/sim/{name}/actuators', 'actuator_msgs/msg/Actuators', 'gz.msgs.Actuators', 'ROS_TO_GZ')] + (
-        [(f'/sim/{name}/effort', 'actuator_msgs/msg/Actuators', 'gz.msgs.Actuators', 'ROS_TO_GZ')] if effort else []):
+        [(f'/sim/{name}/effort', 'actuator_msgs/msg/Actuators', 'gz.msgs.Actuators', 'ROS_TO_GZ')] if effort else []) + (
+        [(f'/sim/{name}/base', 'actuator_msgs/msg/Actuators', 'gz.msgs.Actuators', 'ROS_TO_GZ')]
+        if effort and robot.get('base_motion') else []):
         bridge.append(dict(ros_topic_name=topic, gz_topic_name=topic, ros_type_name=ros_type,
                            gz_type_name=gz_type, direction=direction))
     return bridge
@@ -152,6 +166,14 @@ def configure_effort_world(world, robots_file):
       {handles(box, sx, surface)}</link></model>"""))
     th = wz - sz / 2                                      # 받침대 윗면 = 박스 바닥
     tw = box.get('table_size', [sx, 0.6 * sy])
+    place = box.get('place')                              # 내려놓을 곳: 같은 높이 받침대를 월드 (dx, dy)만큼 옆에
+    if place:
+        world.append(ET.fromstring(f"""<model name='table_place'><static>true</static>
+      <pose>{wx + place.get('dx', 0.0)} {wy + place.get('dy', 0.0)} {th / 2} 0 0 {yaw}</pose><link name='link'>
+      <collision name='c'><geometry><box><size>{tw[0]} {tw[1]} {th}</size></box></geometry>{surface}</collision>
+      <visual name='v'><geometry><box><size>{tw[0]} {tw[1]} {th}</size></box></geometry>
+      <material><ambient>0.3 0.6 0.3 1</ambient><diffuse>0.3 0.6 0.3 1</diffuse></material></visual>
+      </link></model>"""))
     world.append(ET.fromstring(f"""<model name='table'><static>true</static>
       <pose>{wx} {wy} {th / 2} 0 0 {yaw}</pose><link name='link'>
       <collision name='c'><geometry><box><size>{tw[0]} {tw[1]} {th}</size></box></geometry>{surface}</collision>

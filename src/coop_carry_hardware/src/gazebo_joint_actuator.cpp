@@ -24,7 +24,7 @@ class GazeboJointActuator : public gz::sim::System,
 {
   struct Joint {
     gz::sim::Entity entity; double initial, lower, upper, velocity, hold;
-    int command_index, mimic_index;
+    int command_index, mimic_index, base_index = -1;
     bool effort_active = false, release_hold = false;
     double command_at_release = 0.0;
   };
@@ -47,17 +47,27 @@ public:
       if (!ecm.Component<gz::sim::components::JointPosition>(joint)) {
         ecm.CreateComponent(joint, gz::sim::components::JointPosition());
       }
+      if (element->HasElement("base_index")) {joints_.back().base_index = element->Get<int>("base_index");}
       ecm.CreateComponent(joint, gz::sim::components::JointPositionReset({initial}));
       element = element->GetNextElement("joint");
     }
     count_ = sdf->Get<unsigned int>("command_count");
     node_.Subscribe(sdf->Get<std::string>("command_topic"), &GazeboJointActuator::OnCommand, this);
     // [문서 밖] effort(토크) 경로 — 김민기 하위 제어. effort_topic이 없으면 기존 위치 서보만 동작(현대 기본 동작 그대로)
+    // [문서 밖] 베이스 이동 대역: base_topic의 Actuators.position[base_index] = 베이스 슬라이드 관절 목표 [m]
+    if (sdf->HasElement("base_topic")) {
+      node_.Subscribe(sdf->Get<std::string>("base_topic"), &GazeboJointActuator::OnBase, this);
+    }
     if (sdf->HasElement("effort_topic")) {
       effort_timeout_ = sdf->Get<double>("effort_timeout", 0.1).first;
       effort_limit_ = sdf->Get<double>("effort_limit", 60.0).first;
       node_.Subscribe(sdf->Get<std::string>("effort_topic"), &GazeboJointActuator::OnEffort, this);
     }
+  }
+  void OnBase(const gz::msgs::Actuators & msg)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    base_.assign(msg.position().begin(), msg.position().end());
   }
   // 토크 명령: Actuators.normalized[command_index] = 토크[N·m]. NaN인 관절은 기존 위치 서보 유지
   void OnEffort(const gz::msgs::Actuators & msg)
@@ -82,7 +92,7 @@ public:
   void PreUpdate(const gz::sim::UpdateInfo & info, gz::sim::EntityComponentManager & ecm) override
   {
     if (info.paused) {return;}
-    std::vector<double> command, effort, override;
+    std::vector<double> command, effort, override, base;
     bool live, effort_live;
     {
       std::lock_guard<std::mutex> lock(mutex_);
@@ -95,6 +105,7 @@ public:
         std::chrono::duration<double>(std::chrono::steady_clock::now() - effort_received_).count() < effort_timeout_;
       effort = effort_;
       override = override_;
+      base = base_;
     }
     if (was_live_ && !live) {
       for (auto & joint : joints_) {
@@ -131,6 +142,7 @@ public:
         std::abs(command[joint.command_index] - joint.command_at_release) > 1e-3) {joint.release_hold = false;}
       double target = joint.hold;
       if (live && joint.command_index >= 0 && !joint.release_hold) {target = command[joint.command_index];}
+      if (joint.base_index >= 0 && joint.base_index < static_cast<int>(base.size())) {target = base[joint.base_index];}
       if (effort_live && joint.command_index >= 0 && std::isfinite(override[joint.command_index])) {
         target = override[joint.command_index];
         joint.hold = target;
@@ -157,7 +169,7 @@ private:
   unsigned int count_ = 0;
   double timeout_ = 0.5, gain_ = 10.0, command_stamp_ = 0.0;
   bool was_live_ = false;
-  std::vector<double> effort_, override_;
+  std::vector<double> effort_, override_, base_;
   std::chrono::steady_clock::time_point effort_received_;
   double effort_timeout_ = 0.1, effort_limit_ = 60.0;
 };

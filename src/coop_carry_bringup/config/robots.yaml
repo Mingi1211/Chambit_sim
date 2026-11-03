@@ -13,6 +13,8 @@ robots:
 # --- 김민기 하위 제어 (토크 임피던스) ---------------------------------------
 # position: 현대 기본(위치 서보만) / effort: 토크 경로 + 물리 1 ms + 외력 시험 플러그인 + 박스
 control_mode: effort
+gripper_effort: 100.0              # 그리퍼 관절 effort 한계(시뮬). 1000 → 손잡이에 파고들어 RTF 0.007. 5·20·100 모두 손가락이 q≈0.53에서 멈춤(정렬 문제로 추정)
+base_motion: true                  # effort 모드: 베이스를 월드 y로 옮길 수 있게(물리 모델만 슬라이드 관절, 현대 주행 대역)
 state_rate: 500                    # effort 모드 관절 상태·토크 루프 주기 [Hz] (문서 #8: D < 2Λ/T)
 box:
   robot: robot1
@@ -21,4 +23,5 @@ box:
   mass: 2.0                        # [kg] 두 로봇이 나눠 듦
   mu: 1.0
   handle: {y: 0.276, protrude: 0.05, width: 0.08, thickness: 0.030} # 손잡이 중심 간격 0.552 m; 박스 y 반폭 0.33 m 안에 배치
+  place: {dx: 0.0, dy: 2.0}        # 내려놓을 받침대: 같은 높이, 월드 y로 2 m 옆
   table_size: [0.30, 0.40]         # 박스 아래 중앙 받침대
