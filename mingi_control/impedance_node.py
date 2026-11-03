@@ -121,7 +121,9 @@ class ImpedanceNode(Node):
         d('zeta', 1.0)                                # 문서 #5: ζ=1로 시작
         # [문서 #3] 영공간(팔꿈치) 자세 유지 τ0 게인. 작업공간 K로는 이 방향을 못 버팀 → 너무 작으면 팔꿈치 처짐
         # D_null 상한 [문서 #8]: D·dt/M_min < 1 (손목 M≈0.01, dt=2 ms → D < 5). 1.5 → 0.3
-        d('K_null', 20.0); d('D_null', 1.5)
+        d('K_null', 20.0); d('D_null', 1.5)            # null_gain 'fixed'일 때만
+        # 'inertia': 관절마다 K_i = M_ii ω², D_i = 2ζ M_ii ω (문서 #5를 관절 공간에) — 가벼운 손목에 과한 게인 → 떨림 방지
+        d('null_gain', 'inertia'); d('null_omega', 8.0); d('null_zeta', 1.0)
         # 교수님 지시: 손목 5·6·7 관성(모터 armature) 반영해 Λ 구성 — 실물(output dxl)에만. Gazebo 모델엔 armature가 없어
         # 시뮬에서 넣으면 제어기가 손목을 실제보다 무겁게 봐 D가 커지고 발산(11/3 그리퍼 연 뒤 57 Hz 떨림)
         d('armature', [0.0] * 7)
@@ -263,7 +265,12 @@ class ImpedanceNode(Node):
             # [문서 #3] 영공간: J̄ᵀ = Λ J M⁻¹,  N_T = I − Jᵀ J̄ᵀ,  τ0 = K_q(q_nom − q) − D_q q̇
             J_bar_T = Lambda @ J @ M_inv
             N_T = np.eye(7) - J.T @ J_bar_T
-            tau0 = ramp * (self.get_parameter('K_null').value * (a.q_nom - qa) - self.get_parameter('D_null').value * dqa)
+            if self.get_parameter('null_gain').value == 'inertia':
+                w0, z0 = P('null_omega').item(), P('null_zeta').item()
+                Kn, Dn = np.diag(M) * w0**2, 2 * z0 * np.diag(M) * w0
+            else:
+                Kn, Dn = self.get_parameter('K_null').value, self.get_parameter('D_null').value
+            tau0 = ramp * (Kn * (a.q_nom - qa) - Dn * dqa)
             tau_null = N_T @ tau0
             # [문서 #9] 박스 무게 피드포워드 τ += J_vᵀ[0,0,m g/2]ᵀ — 손 하나가 절반, 램프로 켜고 끔
             step = dt / max(self.get_parameter('weight_ramp').value, 1e-3)
