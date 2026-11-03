@@ -272,6 +272,9 @@ class ImpedanceNode(Node):
                                *np.round(F_cmd[:3], 3), *np.round(F_hat[:3], 3), *np.round(np.diag(K)[:3], 1),
                                *np.round(np.diag(D)[:3], 2), *np.round(np.diag(Lambda)[:3], 3), round(a.m_ff_now, 3),
                                *np.round(tau_cmd, 3)])
+        if now - getattr(self, 'last_flush', 0.0) > 0.1:      # 로그를 0.1 s마다 파일에 씀 (버퍼에만 있으면 분석 불가)
+            self.logf.flush()
+            self.last_flush = now
         cmd = Actuators()
         cmd.header.stamp = self.get_clock().now().to_msg()
         cmd.normalized = out
