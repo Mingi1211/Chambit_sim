@@ -126,6 +126,7 @@ class ImpedanceNode(Node):
         # 시뮬에서 넣으면 제어기가 손목을 실제보다 무겁게 봐 D가 커지고 발산(11/3 그리퍼 연 뒤 57 Hz 떨림)
         d('armature', [0.0] * 7)
         d('armature_real', [0.0, 0.0, 0.0, 0.0, 0.05, 0.05, 0.05])
+        d('limit_margin', 0.15)                       # [rad] 영공간 자세 목표를 가동 한계에서 이만큼 안쪽에 (≈ 9°)
         d('D_safety', 0.5)                            # [문서 #8] D_ii ≤ D_safety · 2Λ_ii / T  (T = 실측 루프 주기)
         d('tau_max', [40.0, 40.0, 30.0, 30.0, 10.0, 10.0, 10.0])
         d('ramp_time', 0.0)                           # 전환 순간 자세 = 목표라 초기 오차 0 → 램프 불필요 (0 = 즉시 K 전부)
@@ -236,7 +237,10 @@ class ImpedanceNode(Node):
             oMf = d.oMf[a.fid]
             p, R = oMf.translation.copy(), oMf.rotation.copy()
             if a.xd is None:                                   # 켤 때 현재 자세를 목표로
-                a.xd, a.q_nom, a.t_on = (p.copy(), R.copy()), qa.copy(), now
+                # [문서 #3] 영공간 자세 목표: 전환 순간 자세를 가동 한계에서 limit_margin만큼 안쪽으로 → τ0가 손은 그대로 두고 한계에서 빼냄
+                lo, hi = m.lowerPositionLimit[a.qi], m.upperPositionLimit[a.qi]
+                mg = P('limit_margin').item()
+                a.xd, a.q_nom, a.t_on = (p.copy(), R.copy()), np.clip(qa, lo + mg, hi - mg), now
             ramp = min(1.0, (now - a.t_on) / max(P('ramp_time').item(), 1e-3))
             # [문서 #1] J: 팔 7축 열만 (리프트 열 제외), 6×7, LOCAL_WORLD_ALIGNED(base_link 축)
             J = pin.getFrameJacobian(m, d, a.fid, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[:, vi]
