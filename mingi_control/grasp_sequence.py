@@ -27,6 +27,7 @@ ap.add_argument('--y', type=float, default=0.12, help='손잡이 y (base_link)')
 ap.add_argument('--z', type=float, default=0.85, help='손잡이 높이 (base_link)')
 ap.add_argument('--x_pre', type=float, default=0.18, help='접근 자세 손끝 x')
 ap.add_argument('--x_grasp', type=float, default=0.285, help='파지 손끝 x (박스 끝면 0.30 바로 앞)')
+ap.add_argument('--z_up', type=float, default=0.10, help='회전할 때 손잡이보다 위로 띄우는 높이')
 ap.add_argument('--squeeze', type=float, default=0.05, help='접촉 위치에서 더 닫는 양 [rad]')
 a = ap.parse_args()
 QUAT = (-0.5, -0.5, 0.5, 0.5)       # 손끝이 +x(박스 쪽), 손가락은 상하로 닫힘 — 두 팔 모두 IK 도달 확인
@@ -65,9 +66,9 @@ def ee(r, s):
     return d.oMf[m.getFrameId(f'end_effector_{s}_link')].translation.copy()
 
 
-def move(x, T, tries=3, tol=0.005):
+def move(x, T, tries=3, tol=0.005, z=None):
     """현대 QP에 목표 전송 → 실제 위치 측정 → 오차만큼 목표 보정해 재전송 (QP 정상오차 보상)"""
-    want = {k: np.array([x, -a.y if k[1] == 'r' else a.y, a.z]) for k in pub_goal}
+    want = {k: np.array([x, -a.y if k[1] == 'r' else a.y, a.z if z is None else z]) for k in pub_goal}
     cmd = {k: v.copy() for k, v in want.items()}
     for i in range(tries):
         send(cmd, T if i == 0 else 2)
@@ -75,9 +76,10 @@ def move(x, T, tries=3, tol=0.005):
         worst = max(np.linalg.norm(e) for e in err.values())
         say(f'  위치 오차 최대 {worst*1000:.1f} mm ' + ' '.join(f'{k[0][-1]}{k[1]}:{np.round(e*1000,0)}' for k, e in err.items()))
         if worst < tol:
-            return
+            return True
         for k in cmd:
             cmd[k] += err[k]
+    return False
 
 
 def send(cmd, T):
@@ -106,8 +108,11 @@ while len(models) < len(a.robots) or len(state) < len(a.robots):
 for r in a.robots:
     pub_mode[r].publish(String(data='position'))
 say('1 그리퍼 열기'); grip({k: OPEN for k in pub_grip}); spin(1.5)
-say(f'2 접근 자세: 손끝 x={a.x_pre}, y=±{a.y}, z={a.z}'); move(a.x_pre, 4)
-say(f'3 전진: 손끝 x={a.x_grasp}'); move(a.x_grasp, 3)
+say(f'2a 손잡이 위 안전 위치에서 그리퍼 회전: x={a.x_pre}, z={a.z + a.z_up}'); ok = move(a.x_pre, 5, z=a.z + a.z_up)
+say(f'2b 수직 하강: z={a.z}'); ok = move(a.x_pre, 3) and ok
+if not ok:
+    say('접근 위치 오차가 5 mm 안에 안 들어옴 — 전진하지 않고 중단'); raise SystemExit(1)
+say(f'3 x 방향으로만 천천히 전진: 손끝 x={a.x_grasp}'); move(a.x_grasp, 4)
 say('4 닫기 + 접촉 감지'); grip({k: CLOSED for k in pub_grip})
 hist = {k: [] for k in pub_grip}
 contact = {}
