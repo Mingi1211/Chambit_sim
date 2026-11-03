@@ -219,8 +219,8 @@ class ImpedanceNode(Node):
         M_full = np.triu(M_full) + np.triu(M_full, 1).T
         out = [math.nan] * len(COMMANDED)
         pos = [math.nan] * len(COMMANDED)
-        for s, v in self.gripper.items():
-            pos[COMMANDED.index(f'gripper_{s}_joint1')] = v
+        for side, target in self.gripper.items():          # (v는 관절 속도 배열 — 덮어쓰지 않게 이름 분리)
+            pos[COMMANDED.index(f'gripper_{side}_joint1')] = target
         mode = self.get_parameter('mode').value
         for a in self.arms:
             if mode == 'position':                              # 토크 전환 전: 팔 NaN → 현대 QP 위치 서보
