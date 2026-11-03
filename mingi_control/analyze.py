@@ -11,6 +11,8 @@ import argparse
 import csv
 import math
 
+import matplotlib
+matplotlib.use('Agg')                      # 화면 없이 PNG만 저장 (Authorization 경고 방지)
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import font_manager
@@ -24,6 +26,8 @@ plt.rcParams['axes.unicode_minus'] = False
 
 def load(path, side):
     rows = [r for r in csv.DictReader(open(path)) if r['side'] == side]
+    if not rows:
+        raise SystemExit(f'{path}: 토크 모드({side}) 데이터 없음 — 아직 task/gravity로 전환 안 됐거나, 노드가 새로 시작돼 빈 로그')
     return {k: np.array([float(r[k]) for r in rows]) for k in rows[0] if k != 'side'}
 
 
