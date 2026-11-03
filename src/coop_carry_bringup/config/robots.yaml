@@ -7,15 +7,17 @@ initial_joint_positions:
   arm_r_joint6: 0
   arm_l_joint6: 0
 robots:
-  - {name: robot1, x: 0.0, y: -0.9, z: 0.2, yaw: 0.0}
-  - {name: robot2, x: 0.0, y: 0.9, z: 0.2, yaw: 0.0}
+  # 박스(월드 원점)를 가운데 두고 마주 봄. 손(base 기준 x 0.40)이 박스 각자 쪽 옆면에 오는 거리
+  - {name: robot1, x: -0.55, y: 0.0, z: 0.2, yaw: 0.0}
+  - {name: robot2, x: 0.55, y: 0.0, z: 0.2, yaw: 3.14159265}
 # --- 김민기 하위 제어 (토크 임피던스) ---------------------------------------
 # position: 현대 기본(위치 서보만) / effort: 토크 경로 + 물리 1 ms + 외력 시험 플러그인 + 박스
 control_mode: effort
 state_rate: 500                    # effort 모드 관절 상태·토크 루프 주기 [Hz] (문서 #8: D < 2Λ/T)
 box:
   robot: robot1
-  center_base: [0.40, 0.0, 0.85]   # robot1 base_link 기준 박스 중심 [m] (현대 MoveL 시험 자세 근처)
-  size: [0.20, 0.30, 0.15]         # x(앞뒤) y(양손 사이) z [m]
-  mass: 1.0                        # [kg]
-  mu: 1.0                          # 손-박스 마찰계수(시뮬 설정값)
+  center_base: [0.55, 0.0, 0.85]   # robot1 base_link 기준 = 월드 원점 위
+  size: [0.50, 0.30, 0.15]         # x(두 로봇 방향) y(옆면 사이) z [m]
+  mass: 2.0                        # [kg] 두 로봇이 나눠 듦
+  mu: 1.0
+  table_size: [0.30, 0.18]         # 받침대: 두 베이스 앞부분(±0.27) 사이, 손(y ±0.23) 안쪽

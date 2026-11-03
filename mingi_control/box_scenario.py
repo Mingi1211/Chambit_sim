@@ -33,6 +33,7 @@ ap.add_argument('--lift', type=float, default=0.05)
 ap.add_argument('--hold', type=float, default=10.0)
 ap.add_argument('--mass', type=float, default=1.0, help='피드포워드에 쓰는 박스 질량(사전 측정값) [kg]')
 ap.add_argument('--move', type=float, default=2.0, help='각 이동 시간 [s] (노드 move_time과 같게)')
+ap.add_argument('--until', choices=['grasp', 'all'], default='all', help='grasp: 쥐고 유지까지만')
 a = ap.parse_args()
 
 rclpy.init()
@@ -82,6 +83,9 @@ th.start()
 step('0 시작 (유지)', 2.0)
 s = a.gap + a.delta
 offset(+s, -s); step(f'1 쥐기: 양손 안쪽으로 {s*100:.0f} cm (gap {a.gap*100:.0f} + δ {a.delta*100:.0f})', a.move + 2.0)
+if a.until == 'grasp':
+    step(f'쥔 채 유지 {a.hold:.0f} s', a.hold)
+    stop.set(); th.join(); print(f'박스 기록: {box_log}'); raise SystemExit
 weight(a.mass); step(f'2 무게 피드포워드 {a.mass} kg 램프 온', 2.0)
 offset(0.0, 0.0, a.lift); step(f'3 들기 +{a.lift*100:.0f} cm', a.move + 1.0)
 step(f'4 유지 {a.hold:.0f} s', a.hold)
