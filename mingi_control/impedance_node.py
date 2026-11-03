@@ -122,7 +122,11 @@ class ImpedanceNode(Node):
         # [문서 #3] 영공간(팔꿈치) 자세 유지 τ0 게인. 작업공간 K로는 이 방향을 못 버팀 → 너무 작으면 팔꿈치 처짐
         # D_null 상한 [문서 #8]: D·dt/M_min < 1 (손목 M≈0.01, dt=2 ms → D < 5). 1.5 → 0.3
         d('K_null', 20.0); d('D_null', 1.5)
-        d('armature', [0.0, 0.0, 0.0, 0.0, 0.05, 0.05, 0.05])  # 교수님 지시: 손목 5·6·7 관성 키워 Λ 구성
+        # 교수님 지시: 손목 5·6·7 관성(모터 armature) 반영해 Λ 구성 — 실물(output dxl)에만. Gazebo 모델엔 armature가 없어
+        # 시뮬에서 넣으면 제어기가 손목을 실제보다 무겁게 봐 D가 커지고 발산(11/3 그리퍼 연 뒤 57 Hz 떨림)
+        d('armature', [0.0] * 7)
+        d('armature_real', [0.0, 0.0, 0.0, 0.0, 0.05, 0.05, 0.05])
+        d('D_safety', 0.5)                            # [문서 #8] D_ii ≤ D_safety · 2Λ_ii / T  (T = 실측 루프 주기)
         d('tau_max', [40.0, 40.0, 30.0, 30.0, 10.0, 10.0, 10.0])
         d('ramp_time', 0.0)                           # 전환 순간 자세 = 목표라 초기 오차 0 → 램프 불필요 (0 = 즉시 K 전부)
         d('weight_ramp', 1.0)                         # [문서 #9] 피드포워드 램프 시간 [s]
@@ -160,7 +164,8 @@ class ImpedanceNode(Node):
         self.logf = open(fn, 'w', newline='')
         self.log = csv.writer(self.logf)
         cols = ['t', 'side'] + [f'{a}{c}' for a in ('p', 'pd', 'e', 'F', 'Fhat') for c in 'xyz'] + \
-               ['Kx', 'Ky', 'Kz', 'Dx', 'Dy', 'Dz', 'Lx', 'Ly', 'Lz', 'm_ff'] + [f'tau{i}' for i in range(1, 8)]
+               ['Kx', 'Ky', 'Kz', 'Dx', 'Dy', 'Dz', 'Lx', 'Ly', 'Lz', 'm_ff'] + [f'tau{i}' for i in range(1, 8)] + \
+               [f'q{i}' for i in range(1, 8)]
         self.log.writerow(cols)
         self.t0 = time.monotonic()
         self.get_logger().info(f'로그: {fn}')
@@ -235,7 +240,7 @@ class ImpedanceNode(Node):
             ramp = min(1.0, (now - a.t_on) / max(P('ramp_time').item(), 1e-3))
             # [문서 #1] J: 팔 7축 열만 (리프트 열 제외), 6×7, LOCAL_WORLD_ALIGNED(base_link 축)
             J = pin.getFrameJacobian(m, d, a.fid, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[:, vi]
-            M = M_full[np.ix_(vi, vi)] + np.diag(P('armature'))
+            M = M_full[np.ix_(vi, vi)] + np.diag(P('armature_real' if self.output == 'dxl' else 'armature'))
             M_inv = np.linalg.inv(M)
             Lambda = np.linalg.inv(J @ M_inv @ J.T + 1e-6 * np.eye(6))
             # [문서 #4] 6D 오차
@@ -244,7 +249,10 @@ class ImpedanceNode(Node):
             edot = Vd - J @ dqa
             # [문서 #5] D = 2ζ√(Λ_ii K_ii), 매 주기 재계산
             K = a.K * ramp
-            D = np.diag(2 * self.get_parameter('zeta').value * np.sqrt(np.clip(np.diag(Lambda) * np.diag(K), 0, None)))
+            D_ii = 2 * self.get_parameter('zeta').value * np.sqrt(np.clip(np.diag(Lambda) * np.diag(K), 0, None))
+            # [문서 #8] 이산화 감쇠 상한 D < 2Λ/T — 실측 루프 주기 T(지연·저속 루프 반영)로 넘지 않게
+            self.T_loop = 0.98 * getattr(self, 'T_loop', 0.002) + 0.02 * dt if 0 < dt < 0.05 else getattr(self, 'T_loop', 0.002)
+            D = np.diag(np.minimum(D_ii, P('D_safety').item() * 2 * np.diag(Lambda) / self.T_loop))
             # [문서 #2] F_cmd = K e + D ė,  τ_task = Jᵀ F_cmd
             F_cmd = K @ e + D @ edot
             tau_task = J.T @ F_cmd
@@ -264,6 +272,9 @@ class ImpedanceNode(Node):
                 tau_cmd = np.clip(tau_task + g_full[vi] + tau_null + tau_ff, -P('tau_max'), P('tau_max'))
             for k, idx in enumerate(a.cmd_idx):
                 out[idx] = float(tau_cmd[k])
+            near = [k + 1 for k, i in enumerate(a.qi) if min(qa[k] - m.lowerPositionLimit[i], m.upperPositionLimit[i] - qa[k]) < 0.05]
+            if near:
+                self.get_logger().warn(f'[{a.side}] 관절 {near} 가동 한계 3° 이내 — 이 방향으로는 손이 못 움직임', throttle_duration_sec=2.0)
             if self.output == 'dxl':
                 self.pub_dxl[a.side].publish(Float64MultiArray(data=self.torque_to_current(tau_cmd).tolist()))
             # [문서 #11] 모니터링: F̂_ext = Λë + Dė + Ke (ë는 ė 차분 — 기록용)
@@ -273,7 +284,7 @@ class ImpedanceNode(Node):
             self.log.writerow([f'{time.time():.4f}', a.side, *np.round(p, 5), *np.round(pd, 5), *np.round(e[:3], 5),
                                *np.round(F_cmd[:3], 3), *np.round(F_hat[:3], 3), *np.round(np.diag(K)[:3], 1),
                                *np.round(np.diag(D)[:3], 2), *np.round(np.diag(Lambda)[:3], 3), round(a.m_ff_now, 3),
-                               *np.round(tau_cmd, 3)])
+                               *np.round(tau_cmd, 3), *np.round(qa, 4)])
         if now - getattr(self, 'last_flush', 0.0) > 0.1:      # 로그를 0.1 s마다 파일에 씀 (버퍼에만 있으면 분석 불가)
             self.logf.flush()
             self.last_flush = now
