@@ -21,6 +21,10 @@ RUN source install/setup.bash && MAKEFLAGS=-j2 colcon build \
     --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 
 FROM dependencies
+# 공식 스워브 제어기도 현재 checkout 버전으로 빌드한다.
+RUN source install/setup.bash && MAKEFLAGS=-j2 colcon build --executor sequential \
+    --base-paths src/ai_worker/ffw_swerve_drive_controller \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 COPY src/coop_carry_hardware/ src/coop_carry_hardware/
 RUN source install/setup.bash && MAKEFLAGS=-j2 colcon build --executor sequential \
     --base-paths src/coop_carry_hardware \

@@ -1,21 +1,43 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>coop_carry_bringup</name><version>0.2.0</version>
+  <name>coop_carry_bringup</name>
+  <version>0.2.0</version>
   <description>Two AI Workers with independent robot runtimes and one Gazebo world.</description>
   <maintainer email="team@example.com">Coop Carry Team</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_python</buildtool_depend>
-  <exec_depend>ament_index_python</exec_depend><exec_depend>launch</exec_depend><exec_depend>launch_ros</exec_depend>
-  <exec_depend>python3-yaml</exec_depend><exec_depend>xacro</exec_depend>
-  <exec_depend>ffw_description</exec_depend><exec_depend>ffw_bringup</exec_depend>
-  <exec_depend>ros_gz_sim</exec_depend><exec_depend>ros_gz_bridge</exec_depend>
-  <exec_depend>controller_manager</exec_depend><exec_depend>controller_manager_msgs</exec_depend>
-  <exec_depend>joint_state_broadcaster</exec_depend><exec_depend>joint_trajectory_controller</exec_depend>
-  <exec_depend>coop_carry_hardware</exec_depend><exec_depend>actuator_msgs</exec_depend>
-  <exec_depend>robot_state_publisher</exec_depend><exec_depend>rclpy</exec_depend><exec_depend>rmw_zenoh_cpp</exec_depend>
-  <exec_depend>robotis_interfaces</exec_depend><exec_depend>cyclo_motion_controller_ros</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend><exec_depend>trajectory_msgs</exec_depend><exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>std_msgs</exec_depend><exec_depend>diagnostic_msgs</exec_depend><exec_depend>lifecycle_msgs</exec_depend><exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>ffw_description</exec_depend>
+  <exec_depend>ffw_bringup</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
+  <exec_depend>ffw_swerve_drive_controller</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>coop_carry_hardware</exec_depend>
+  <exec_depend>actuator_msgs</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rmw_zenoh_cpp</exec_depend>
+  <exec_depend>robotis_interfaces</exec_depend>
+  <exec_depend>cyclo_motion_controller_ros</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
   <test_depend>python3-pytest</test_depend>
-  <export><build_type>ament_python</build_type></export>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
 </package>

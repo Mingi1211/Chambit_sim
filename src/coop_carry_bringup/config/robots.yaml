@@ -1,5 +1,8 @@
+# fixed는 기존 고정 베이스 시험용, swerve는 실제 바퀴 주행용.
+base_mode: swerve
+
 initial_joint_positions:
-  # Inside both Gazebo and Cyclo limits; avoids the invalid all-zero elbow pose.
+  # 두 로봇이 공유하는 초기 팔 관절 각도(rad). Cyclo 모델 제한은 별도 확인한다.
   arm_r_joint2: 0
   arm_l_joint2: 0
   arm_r_joint4: 0
@@ -7,5 +10,15 @@ initial_joint_positions:
   arm_r_joint6: 0
   arm_l_joint6: 0
 robots:
-  - {name: robot1, x: 0.0, y: -0.9, z: 0.2, yaw: 0.0}
-  - {name: robot2, x: 0.0, y: 0.9, z: 0.2, yaw: 0.0}
+  # Gazebo 월드에서의 배치: 위치는 m, yaw는 rad.
+  - name: robot1
+    x: 0.0
+    y: -0.9
+    z: 0.2
+    yaw: 0.0
+
+  - name: robot2
+    x: 0.0
+    y: 0.9
+    z: 0.2
+    yaw: 0.0
