@@ -75,12 +75,15 @@ def t5(a):
     L = load(a.log, a.side)
     t = L['t']
     i = 'xyz'.index(a.axis)
-    after = t >= a.t_step
+    after = (t >= a.t_step) & (t < (a.t_end if a.t_end else np.inf))     # 다음 입력 전까지만
     p, pd = L[f'p{a.axis}'], L[f'pd{a.axis}']
     k0 = np.argmax(after)
     p0, pf = p[k0 - 1], pd[after][-1]
     step = pf - p0
     seg_t, seg_p = t[after] - a.t_step, p[after]
+    if 'ts' in L:                                  # 시뮬 시간 기준 (RTF < 1이면 벽시계는 실제보다 김)
+        seg_t = L['ts'][after] - L['ts'][k0]
+        print(f'  시간축: 시뮬 시간 (측정 루프 주기 T = {np.median(L["T"][after])*1000:.1f} ms)')
     over = max(0.0, ((seg_p - pf) * np.sign(step)).max()) / abs(step) * 100
     outside = np.abs(seg_p - pf) > 0.02 * abs(step)
     Ts = seg_t[np.where(outside)[0][-1]] if outside.any() else 0.0
@@ -150,6 +153,15 @@ def carry(a):
         bw = (B['t'] > tb - 1.0) & (B['t'] < tb)
         by, bz = (B['y'][bw].mean() - B['y'][0]) * 100, (B['z'][bw].mean() - B['z'][0]) * 100
         print(f'  {name:32s} 손 z오차 {ez:5.1f} mm | |F_y| 리더 {fy["robot1"]:5.1f} N, 팔로워 {fy["robot2"]:5.1f} N | 박스 Δy {by:5.1f} cm, Δz {bz:5.1f} cm')
+    # 베이스 이동 구간 내력 검증 (gain_design ⑥: 손당 F_int ≤ F_int,max, 예측 Δ·K_L K_F/(K_L+K_F))
+    t_b0 = next((t for k, t in ev if k.startswith('4')), None)
+    t_b1 = next((t for k, t in ev if '도착' in k), None)
+    if t_b0 and t_b1:
+        for r in ('robot1', 'robot2'):
+            fxy = max(np.hypot(D[r, s]['Fx'], D[r, s]['Fy'])[win(D[r, s], t_b0, t_b1)].max() for s in 'rl')
+            print(f'  베이스 이동 중 {r} 손 수평 힘 |F_cmd,xy| 최대 {fxy:.1f} N (허용 15 N)')
+    if 'roll' in B.dtype.names:
+        print(f'  박스 기울기 최대 {np.degrees(np.maximum(np.abs(B["roll"]), np.abs(B["pitch"]))).max():.1f}° (판정 2°)')
     fig, ax = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
     for (r, s), L in D.items():
         ax[0].plot(L['t'] - t0, L['Fy'], label=f'{r}/{s} F_y')
@@ -175,7 +187,7 @@ if __name__ == '__main__':
     ap.add_argument('--side', default='r')
     ap.add_argument('--t_on', type=float); ap.add_argument('--t_off', type=float)
     ap.add_argument('--F', type=float, nargs=3)
-    ap.add_argument('--t_step', type=float); ap.add_argument('--axis', default='y')
+    ap.add_argument('--t_step', type=float); ap.add_argument('--t_end', type=float); ap.add_argument('--axis', default='y')
     ap.add_argument('--t0', type=float, help='t12: 이 시각(로그 t)부터 처짐 계산')
     a = ap.parse_args()
     {'t12': t12, 't4': t4, 't5': t5, 'box': box, 'carry': carry}[a.kind](a)

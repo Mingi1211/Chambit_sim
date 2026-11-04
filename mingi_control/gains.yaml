@@ -1,0 +1,23 @@
+# gain_design.py가 생성 — 값마다 근거는 gain_design.py 출력(GAIN_RATIONALE.md) 참고
+K_pos:
+- 500.0
+- 500.0
+- 400.0
+leader_K_pos:
+- 500.0
+- 500.0
+- 400.0
+follower_K_pos:
+- 40.0
+- 40.0
+- 400.0
+K_rot:
+- 5.0
+- 5.0
+- 5.0
+omega_max: 62.83
+D_safety: 1.0
+null_omega: 8.11
+zeta: 1.0
+weight_ramp: 1.43
+gripper_effort: 0.88

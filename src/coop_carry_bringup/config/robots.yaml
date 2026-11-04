@@ -27,8 +27,8 @@ robots:
 # --- 김민기 하위 제어 (토크 임피던스) ---------------------------------------
 # position: 현대 기본(위치 서보만) / effort: 토크 경로 + 물리 1 ms + 외력 시험 플러그인 + 박스
 control_mode: effort
-gripper_effort: 100.0              # 그리퍼 관절 effort 한계(시뮬). 1000이면 손잡이에 파고들어 RTF 0.007. 접촉 감지 후에는 손-박스 고정 구속으로 하중 전달(simulation.py)
-state_rate: 500                    # effort 모드 관절 상태·토크 루프 주기 [Hz] (문서 #8: D < 2Λ/T)
+gripper_effort: 0.88               # 그리퍼 쥐는 토크 [N·m] = gain_design.py ⑨ (N ≥ 15.8 N, 가상일 τ = N·|dgap/dq|/2)
+state_rate: 500                    # 시뮬 관절 상태·토크 루프 [Hz]. 게인은 실물 100 Hz 기준(gain_design ③⑦); 시뮬 플랜트는 armature가 없어 100 Hz면 이산 불안정 → 500 Hz에서 검증
 box:
   robot: robot1
   center_base: [0.55, 0.0, 0.85]   # robot1 base_link 기준 = 월드 원점 위

@@ -32,6 +32,10 @@ cd ~/Desktop/Chambit_Sim && bash scripts/build_host.bash && docker compose -f do
 ```bash
 cd ~/Desktop/Chambit_Sim && docker compose -f docker/compose.yaml down && xhost +si:localuser:root && COOP_GUI=true docker compose -f docker/compose.yaml up -d --no-build
 ```
+터미널 1에서 이어서 **현대 베이스 노드** (스워브 주행, 시나리오가 서비스로 시작시킴 — 공통 셸 설정 후):
+```bash
+ros2 launch coop_carry_bringup base_move.launch.py
+```
 ⚠️ Gazebo 창을 닫으면 시뮬 전체가 종료된다(최소화만).
 
 **터미널 2·3·4 — 공통으로 먼저**: `~/.bashrc`의 다른 ROS 설정과 섞이지 않게 깨끗한 셸 + 현대 환경(Zenoh, domain 71)
@@ -53,14 +57,16 @@ python3 impedance_node.py --ros-args -r __ns:=/robot2 -p robot:=robot2 -p "sides
 **터미널 4 — 시나리오**
 ```bash
 python3 grasp_sequence.py          # 접근(현대 QP) → 그리퍼 접촉 감지 → 토크(임피던스) 전환
-python3 transport_scenario.py      # 들기 → 베이스 2 m 이동 → 내려놓기 → 놓기 → 위치 제어 복귀
+python3 transport_scenario.py      # 들기 → 현대 스워브 2 m → 내려놓기 → 놓기 → 팔 빼기 → 위치 제어 복귀 (끝에 판정 출력)
 python3 analyze.py carry $(ls -t ~/impedance_logs/*_carry_box.csv | head -1)   # 단계별 처짐·내력·박스 이동 + 그래프
 ```
 
 | 확인 | 기준 |
 |---|---|
 | `grasp_sequence.py` 끝 | `완료: 임피던스로 현재 자세 유지 중`, 4팔 `멈춤 q` 0.75~0.95 |
-| 운반 끝 박스 위치 `gz model -m box -p` | 약 (0, 2.0, 1.05) = 옆 받침대 위 |
+| 운반 끝 박스 위치 (판정 줄) | 약 (0, 2.0, 0.85) = 옆 받침대 위, 기울기 < 2° |
+
+게인은 `gains.yaml` (= `python3 gain_design.py --urdf control.urdf` 결과, 근거는 [mingi_control/GAIN_RATIONALE.md](mingi_control/GAIN_RATIONALE.md)). 베이스 간 거리 오차 측정: `python3 base_error.py` (박스 없이).
 
 다른 시나리오: `carry_scenario.py`(베이스 고정, 리더만 옆 이동 — 리더–팔로워 내력 비교), 허공 시험 `step.py`(계단 응답), `push.py`(외력), `mode:=gravity`(중력 보상만).
 
@@ -101,7 +107,7 @@ python3 analyze.py carry $(ls -t ~/impedance_logs/*_carry_box.csv | head -1)   #
 | #9 | τ += J_vᵀ[0, 0, m g/2]ᵀ (램프) | 279 | 박스 무게 미리 보상 → K_z는 추정 오차만 |
 | #2 | τ_cmd = τ_task + g + τ_null (+ff), 포화 | 283 | 최종 토크 |
 | #11 | F̂_ext = Λë + Dė + Ke | 295 | 센서 없는 외력 지표(로그) |
-| #7 | 리더 K = (800, 800, 1000), 팔로워 (300, 300, 1000) N/m | 114 | 수평 부드럽게·수직 단단하게, 리더 단단·팔로워 부드럽게 |
+| #7 | 리더 K = (500, 500, 400), 팔로워 (40, 40, 400) N/m, K_rot 5 — `gains.yaml` | 114 | 값마다 사양→식→값: [GAIN_RATIONALE.md](mingi_control/GAIN_RATIONALE.md) |
 
 적분항 없음(#13). 문서에 없는 제어 방법은 쓰지 않음. 게인 범위는 `gain_design.py`(#5~#9), 식 검증은 `check_theory.py`(T3 영공간, T6 문서 예제).
 
@@ -116,7 +122,9 @@ python3 analyze.py carry $(ls -t ~/impedance_logs/*_carry_box.csv | head -1)   #
 | 팔로워 내력: 부드러움 vs 단단함 (#7) | 부드러움 < 단단함 | 5.3 N < 8.7 N |
 | 영공간 간섭 T3 (#3) | < 1e-9 | 2.9e-11 |
 | 문서 예제 T6 (#6) | K 1000, D 126.5, Tₛ 0.37 s | 동일 |
-| **전체 운반** | 받침대 (0, 2.0, 1.05) | **(−0.006, 2.018, 1.050)** |
+| **전체 운반 (11/5, 현대 스워브·고정 구속 없음·쥐는 힘 0.88 N·m)** | 받침대 (0, 2.0, 0.85), 기울기 < 2° | **(−0.026, 1.982, 0.850), 기울기 0.0° (운반 중 최대 0.4°)** |
+| 피드포워드 전 z 처짐 (K_z 400) | F/K = 4.905/400 = 12.3 mm | 12.2 mm |
+| 베이스 이동 중 손 수평 내력 | ≤ 15 N | 최대 4.1 N |
 
 ### 2-4. 파일
 
@@ -147,10 +155,13 @@ python3 analyze.py carry $(ls -t ~/impedance_logs/*_carry_box.csv | head -1)   #
 | 토크 전환 시 손목 11~13° 떨림, 12.3 Hz 진동 | 관성 작은 손목에 고정 게인 과대(D·dt/M > 1) + 물리 10 ms 지연 | 물리 1 ms, 축별 ωn·D 상한(#8), 영공간 게인 관절 관성 비례 |
 | 놓은 뒤·특이 자세에서 57 Hz 떨림 | 시뮬에 없는 모터 관성(armature)을 모델에 넣어 D 과대 | 시뮬은 armature 0(모델=플랜트), 실물에서만 사용 |
 | 손 위치 일정한데 팔꿈치가 처짐 | 7축의 영공간(팔꿈치)은 τ0로만 버팀 | 영공간 게인 관절 관성 비례(#3, #5) |
-| 박스가 전혀 안 들림, 시뮬이 굳은 듯 | 그리퍼 effort 1000 → 손잡이에 파고들어 접촉 계산 폭주, **RTF 0.007** | 물리 모델 그리퍼 effort 한계 100 |
+| 박스가 전혀 안 들림, 시뮬이 굳은 듯 | 그리퍼 effort 1000 → 손잡이에 파고들어 접촉 계산 폭주, **RTF 0.007** | 물리 모델 그리퍼 effort 한계 (현재 0.88 N·m, 아래) |
 | 그리퍼가 q ≈ 0.53에서 멈추고 운반 중 박스 낙하 | 손잡이와 손가락 닫힘 중심이 어긋나 한쪽만 닿음 | grasp_sequence 정렬 수정(접촉 q 0.84~0.93) |
 | 들기·이동 시 한 손이 막혀 전체가 안 움직임 | 관절 가동 한계에 붙음 → 박스로 묶인 닫힌 고리 전체 잠김 | 영공간 자세 목표를 한계 9° 안쪽(#3), 한계 근접 경고 |
-| 베이스가 안 움직임 | 현대 모델은 베이스를 월드에 고정 관절로 붙임(set_pose 무시) | effort 모드 물리 모델만 y 슬라이드 관절로(실제 주행은 현대 파트) |
+| 베이스가 2 m 대신 0.65~0.72 m만 감 (박스 유무 무관) | 스워브 제어기는 조향이 이동 방향에 정렬될 때까지 구동을 막는데(정지 시 0.01 rad), 10초 속도 패턴은 시작과 동시에 흘러 정렬 시간(≈5.8 s)만큼 명령 거리 손실 | `base_move_node`에 정렬 단계 추가: 작은 속도로 방향만 주고 두 로봇 차체가 실제로 움직이면 공통 10초 패턴 시작 → 1.98 / 2.03 m |
+| 파지하면 RTF 0.01 → 베이스 노드가 피드백 끊김으로 출발 거부 | 그리퍼 effort 100으로 손잡이를 계속 조여 메시 접촉 계산 폭주 | 쥐는 힘을 역학으로 설계(gain_design ⑨, 0.88 N·m) → 쥔 상태 RTF 0.17 |
+| 쥐는 힘을 낮췄더니 4손 모두 끝까지 닫힘 | 시뮬 mimic 관절(2·3·4)도 같은 effort 한계 → 손잡이에 밀려 접힘 (실물은 강체 링크) | 한계는 구동 관절(joint1)에만 |
+| 토크 모드 전환 직후 팔이 처지며 토크 한계 (100 Hz, K 3000) | 축별 Λ 근사로는 손목 관절 모드를 못 봄: 실제 최고 모드 95 rad/s > 62.8 | 이산 폐루프 ρ(Φ) < 1로 재설계(K_L 500). 시뮬은 armature가 없어 100 Hz 불안정 → 500 Hz에서 검증 |
 | 놓은 뒤 task 모드 떨림 | 박스 질량이 빠지며 손목 불안정 — **원인 분석 중** | 놓으면 위치 제어 복귀 |
 | 화면 동작이 느림 | 두 로봇 1 ms 물리로 RTF ≈ 0.3 | 결과엔 영향 없음, 기다리면 됨 |
 

@@ -138,6 +138,15 @@ class ImpedanceNode(Node):
         d('move_time', 3.0)
         d('state_timeout', 0.05)
         d('log_dir', os.path.expanduser('~/impedance_logs'))
+        # 게인 = gain_design.py가 사양·문서 식으로 계산한 gains.yaml (명령줄 -p 로 준 값이 우선)
+        d('gains_file', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gains.yaml'))
+        gf = self.get_parameter('gains_file').value
+        if gf and os.path.exists(gf):
+            given = set(getattr(self, '_parameter_overrides', {}))
+            gains = yaml.safe_load(open(gf)) or {}
+            self.set_parameters([rclpy.parameter.Parameter(k, value=v) for k, v in gains.items()
+                                 if self.has_parameter(k) and k not in given])
+            self.get_logger().info(f'게인 파일 {gf}: ' + ', '.join(f'{k}={gains[k]}' for k in gains if self.has_parameter(k)))
         self.robot = self.get_parameter('robot').value
         self.model = None
         self.enabled = True
@@ -170,7 +179,7 @@ class ImpedanceNode(Node):
         self.log = csv.writer(self.logf)
         cols = ['t', 'side'] + [f'{a}{c}' for a in ('p', 'pd', 'e', 'F', 'Fhat') for c in 'xyz'] + \
                ['Kx', 'Ky', 'Kz', 'Dx', 'Dy', 'Dz', 'Lx', 'Ly', 'Lz', 'm_ff'] + [f'tau{i}' for i in range(1, 8)] + \
-               [f'q{i}' for i in range(1, 8)]
+               [f'q{i}' for i in range(1, 8)] + ['ts', 'T']    # ts: 상태 메시지 시각(시뮬 시간), T: 측정 루프 주기
         self.log.writerow(cols)
         self.t0 = time.monotonic()
         self.get_logger().info(f'로그: {fn}')
@@ -207,7 +216,9 @@ class ImpedanceNode(Node):
         """[문서 밖] 관절 상태가 올 때마다 1주기 계산 → 상태 주기(state_rate) = 토크 루프 주기"""
         if self.model is None or not self.enabled:
             return
-        now = time.monotonic()
+        # 루프 주기 T = 상태 메시지 시각 차 (시뮬은 시뮬 시간: 플랜트가 토크를 유지하는 실제 간격 → 문서 4쪽 D < 2Λ/T의 T)
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        now = stamp if stamp > 0 else time.monotonic()
         dt = now - self.last_state if self.last_state else 0.0
         self.last_state = now
         m, d = self.model, self.data
@@ -299,7 +310,7 @@ class ImpedanceNode(Node):
             self.log.writerow([f'{time.time():.4f}', a.side, *np.round(p, 5), *np.round(pd, 5), *np.round(e[:3], 5),
                                *np.round(F_cmd[:3], 3), *np.round(F_hat[:3], 3), *np.round(np.diag(K)[:3], 1),
                                *np.round(np.diag(D)[:3], 2), *np.round(np.diag(Lambda)[:3], 3), round(a.m_ff_now, 3),
-                               *np.round(tau_cmd, 3), *np.round(qa, 4)])
+                               *np.round(tau_cmd, 3), *np.round(qa, 4), f'{now:.4f}', round(self.T_loop, 5)])
         if now - getattr(self, 'last_flush', 0.0) > 0.1:      # 로그를 0.1 s마다 파일에 씀 (버퍼에만 있으면 분석 불가)
             self.logf.flush()
             self.last_flush = now

@@ -39,8 +39,9 @@ ap.add_argument('--dy', type=float, default=2.0, help='판정용: robots.yaml bo
 ap.add_argument('--base_timeout', type=float, default=300.0, help='베이스 이동 완료 대기 [s, wall]')
 ap.add_argument('--lift', type=float, default=0.05)
 ap.add_argument('--box_mass', type=float, default=2.0)
-ap.add_argument('--K_leader', type=float, nargs=3, default=[800.0, 800.0, 1000.0])
-ap.add_argument('--K_follower', type=float, nargs=3, default=[300.0, 300.0, 1000.0])
+GAINS = yaml.safe_load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gains.yaml')))   # gain_design.py 결과
+ap.add_argument('--K_leader', type=float, nargs=3, default=GAINS['leader_K_pos'])
+ap.add_argument('--K_follower', type=float, nargs=3, default=GAINS['follower_K_pos'])
 ap.add_argument('--move', type=float, default=4.0)
 ap.add_argument('--retract', type=float, default=0.12, help='놓은 뒤 손을 박스에서 빼는 거리 [m] (각 base_link −x)')
 ap.add_argument('--retract_up', type=float, default=0.03, help='빼면서 함께 올리는 높이 [m] (손잡이에 손가락이 걸리지 않게)')
@@ -123,7 +124,7 @@ put(a.follower, 'stiffness', a.K_follower)
 step(f'1 강성: 리더 {a.K_leader}, 팔로워 {a.K_follower}', 2.0)
 for r in robots:
     put(r, 'weight', a.box_mass / 2)
-step(f'2 무게 피드포워드 로봇당 {a.box_mass/2} kg', 2.0)
+step(f'2 무게 피드포워드 로봇당 {a.box_mass/2} kg (램프 {GAINS["weight_ramp"]} s 시뮬 시간)', 8.0)
 for r in robots:
     put(r, 'offset', (0.0, 0.0, a.lift))
 step(f'3 들기 +{a.lift*100:.0f} cm', a.move + 2.0)
@@ -146,11 +147,17 @@ while not base_done['v']:
         break
 lift_pub.publish(Bool(data=False))
 step('   베이스 도착', 3.0)
+# 파지 순간 박스가 받침대에서 들려 있던 높이(접촉 감지 뒤 쥐며 들림, 11/5 실측 1.3 cm)만큼 더 내려야 받침대에 닿음
+box_cfg = yaml.safe_load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src/coop_carry_bringup/config/robots.yaml')))['box']
+z_rest = box_cfg['center_base'][2]          # 받침대 위 박스 중심 높이 (base z 0)
+rows0 = [l.split(',') for l in open(box_log).read().splitlines()[1:3]]
+z_extra = max(0.0, float(rows0[0][3]) - z_rest) if rows0 else 0.0
+print(f'   파지 시 박스 들림 {z_extra*1000:.1f} mm → 내려놓기 총 {(a.lift + z_extra)*100:.1f} cm', flush=True)
 # 5 내려놓기 — 받침대 1 cm 위까지 내린 뒤 마지막 1 cm만 따로: 닿는 순간 손 목표가 거의 접촉 높이라
 #   K_z·오차로 누르는 힘이 작음(문서 #4 e = F/K) → 한쪽 모서리만 눌려 박스가 기우는 것을 막음
 for r in robots:
-    put(r, 'offset', (0.0, 0.0, -(a.lift - 0.01)))
-step(f'5 내려놓기 −{(a.lift-0.01)*100:.0f} cm (받침대 1 cm 위)', a.move + 1.0)
+    put(r, 'offset', (0.0, 0.0, -(a.lift + z_extra - 0.01)))
+step(f'5 내려놓기 −{(a.lift + z_extra - 0.01)*100:.1f} cm (받침대 1 cm 위)', a.move + 1.0)
 for r in robots:
     put(r, 'offset', (0.0, 0.0, -0.01))
 step('   마지막 1 cm', a.move + 1.0)
