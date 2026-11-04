@@ -10,16 +10,18 @@
 
 | 문서 | 식 | 줄 | 뜻 |
 |---|---|---|---|
-| #12-③ · MR 8.3 | g(q) = RNEA(q, 0, 0) | 174 | 지금 자세에서 팔 무게를 버티는 토크. 지탱 토크라 τ에 **+g** |
-| #1 · MR 8.6 | M 대칭화, J(팔 7축, 리프트 제외) | 178, 190 | crba는 위 삼각만 채움. J는 base_link 축 기준 6×7 |
-| #1 · Khatib | Λ = (J M⁻¹ Jᵀ)⁻¹ | 192–194 | 손에서 본 유효 질량. 손목 5·6·7 armature 0.05 추가(교수님 지시) |
-| #4 | e = [p_d − p ; log3(R_d Rᵀ)], ė = V_d − J q̇ | 195–198 | 위치·자세 오차. 목표 가속도 0 가정 |
-| #5 · MR 11.2.2 | D = 2ζ√(Λ_ii K_ii) | 199–201 | 축마다 임계감쇠(ζ=1). Λ가 자세마다 바뀌어 매 주기 재계산. 입력은 K, ζ뿐 |
-| #2 · MR 11.7.1 | F_cmd = K e + D ė, τ_task = Jᵀ F_cmd | 202–204 | 손에 스프링·댐퍼를 단 힘 → 관절 토크 (MR 5.2 τ = JᵀF) |
-| #3 · Khatib | J̄ᵀ = Λ J M⁻¹, N_T = I − Jᵀ J̄ᵀ, τ0 = K_q(q_nom − q) − D_q q̇ | 205–209 | 남는 1자유도(7축−6)로 자세 유지. 손에는 영향 없음(T3) |
-| #9 | τ += J_vᵀ[0, 0, m g/2]ᵀ (램프) | 210–213 | 박스 무게 절반씩 미리 들어 줌 → K_z는 무게 오차만 감당 |
-| #2 | τ_cmd = τ_task + g + τ_null (+ff), 포화 | 214–219 | 최종 토크. `mode gravity`면 g만 (T12) |
-| #11 | F̂_ext = Λë + Dė + Ke | 221–224 | 센서 없는 외력 지표(기록용). 쥐는 힘은 F_cmd,y로 본다 |
+| #12-③ · MR 8.3 | g(q) = RNEA(q, 0, 0) | 223 | 지금 자세에서 팔 무게를 버티는 토크. 지탱 토크라 τ에 **+g** |
+| #1 · MR 8.6 | M 대칭화, J(팔 7축, 리프트 제외) | 227, 249–250 | crba는 위 삼각만 채움. J는 base_link 축 기준 6×7 |
+| #1 · Khatib | Λ = (J M⁻¹ Jᵀ + 1e-6 I)⁻¹ | 251–253 | 손에서 본 유효 질량. armature: 시뮬 0(모델=플랜트), 실물 손목 5·6·7 0.05(`armature_real`) |
+| #3 | q_nom = 전환 순간 자세를 가동 한계 안쪽 limit_margin(0.15 rad)으로 | 244 | 영공간 자세 목표가 관절 한계에 붙지 않게 |
+| #4 | e = [p_d − p ; log3(R_d Rᵀ)], ė = V_d − J q̇ | 254–257 | 위치·자세 오차. 목표 가속도 0 가정 |
+| #5 · MR 11.2.2 | D = 2ζ√(Λ_ii K_ii) | 258, 262 | 축마다 임계감쇠(ζ=1). Λ가 자세마다 바뀌어 매 주기 재계산. 입력은 K, ζ뿐 |
+| #8 | K_ii ≤ Λ_ii ω_max² (ω_max 25), D_ii ≤ 0.5·2Λ_ii/T | 260–265 | 이산 시간 안정 조건. T는 실측 루프 주기 |
+| #2 · MR 11.7.1 | F_cmd = K e + D ė, τ_task = Jᵀ F_cmd | 266–268 | 손에 스프링·댐퍼를 단 힘 → 관절 토크 (MR 5.2 τ = JᵀF) |
+| #3 · Khatib | J̄ᵀ = Λ J M⁻¹, N_T = I − Jᵀ J̄ᵀ, τ0 = K_q(q_nom − q) − D_q q̇ | 269–278 | 남는 1자유도(7축−6)로 자세 유지. 손에는 영향 없음(T3). K_q = M_ii ω², D_q = 2ζ M_ii ω (ω 8) |
+| #9 | τ += J_vᵀ[0, 0, m g/2]ᵀ (램프) | 279–282 | 박스 무게 절반씩 미리 들어 줌 → K_z는 무게 오차만 감당 |
+| #2 | τ_cmd = τ_task + g + τ_null (+ff), 포화 | 283–289 | 최종 토크. `mode gravity`면 g만 (T12) |
+| #11 | F̂_ext = Λë + Dė + Ke | 295– | 센서 없는 외력 지표(기록용). 쥐는 힘은 F_cmd,y로 본다 |
 
 적분항 없음(#13, 와인드업 방지). 문서에 없는 제어 방법(computed torque·어드미턴스·관측기)은 쓰지 않음.
 
@@ -35,7 +37,7 @@
 ## 3. 실행 순서
 
 ```bash
-# 0) 이미지 빌드 (C++ 플러그인·설정이 바뀌었으므로) — ~/KW_Internship
+# 0) 이미지 빌드 (C++ 플러그인·설정이 바뀌었으므로) — ~/Desktop/Chambit_Sim
 docker compose -f docker/compose.yaml build
 # 1) 실행 (GUI)
 xhost +si:localuser:root && COOP_GUI=true docker compose -f docker/compose.yaml up -d --no-build
@@ -43,7 +45,7 @@ xhost +si:localuser:root && COOP_GUI=true docker compose -f docker/compose.yaml 
 이후 터미널은 모두 **깨끗한 셸**에서:
 ```bash
 env -i HOME="$HOME" USER="$USER" DISPLAY="$DISPLAY" TERM="$TERM" PATH=/usr/bin:/bin bash --norc
-cd ~/KW_Internship && source scripts/environment.bash && cd mingi_control
+cd ~/Desktop/Chambit_Sim && source scripts/environment.bash && cd mingi_control
 ```
 | 단계 | 명령 | 확인 |
 |---|---|---|
@@ -107,7 +109,7 @@ cd ~/KW_Internship && source scripts/environment.bash && cd mingi_control
 | 리더–팔로워(리더 목표 옆 5 cm) | 박스 3.1 cm 따라옴(예측 3.6). 손 옆 힘: 팔로워 부드러움 5.3 N < 단단함 8.6 N | 문서 #7 |
 | 내리기 → 놓기 → 위치 제어 복귀 | 완료 | — |
 
-고친 것: ① 그리퍼 effort 한계 5 N·m(시뮬) — 1000이면 손잡이에 파고들어 RTF 0.007로 시뮬이 멈춘 듯 보였음
+고친 것: ① 그리퍼 effort 한계 100(시뮬 물리 모델만) — 1000이면 손잡이에 파고들어 RTF 0.007로 시뮬이 멈춘 듯 보였음
 ② 영공간 게인 관절 관성 비례(문서 #5 관절 적용) ③ 축별 ωn 상한·D 상한(문서 #8) ④ 시뮬 armature 0(모델=플랜트) ⑤ 영공간 자세 목표 한계 회피(문서 #3)
 
 남은 것: 박스를 놓은 뒤 task 모드면 손목(5·6·7)부터 떨림 시작(박스 질량이 빠지며 불안정) → 지금은 놓으면 위치 제어로 복귀.
@@ -119,6 +121,7 @@ cd ~/KW_Internship && source scripts/environment.bash && cd mingi_control
   월드 y 슬라이드 관절로 바꾸고 `/sim/<robot>/base`로 목표 위치를 줌. 실제 스워브 주행은 현대 파트
 - 내려놓을 받침대: 같은 높이, 월드 y +2 m (`box.place`)
 - 순서: 강성(리더 800·팔로워 300) → 무게 피드포워드 → 들기 → 베이스 2 m 이동(팔로워 0.2 s 지연) → 내려놓기 → 놓기 → 위치 제어
-- 결과: 두 베이스 2 m 이동 성공. 박스는 들기·유지·이동 초반(약 0.4~0.5 m)까지 들림, 이후 손에서 빠져 낙하
+- 첫 시도: 두 베이스 2 m 이동 성공. 박스는 들기·유지·이동 초반(약 0.4~0.5 m)까지 들림, 이후 손에서 빠져 낙하
 - 원인: 그리퍼가 q≈0.53에서 멈춤(effort 20·100 같은 값 → 힘 부족이 아니라 손가락이 손잡이에 한쪽만 닿는 정렬 문제로 추정).
-  정상 파지(손잡이 30 mm)는 q≈0.85. → 파지 정렬(grasp_sequence: 손잡이 높이와 손가락 닫힘 중심 일치) 확인 필요
+  정상 파지(손잡이 30 mm)는 q≈0.85.
+- 해결: grasp_sequence 정렬 수정(Codex, 커밋 e6f5d49) → 운반 끝까지 성공, 박스 최종 (−0.006, 2.018, 1.050) = 받침대 위
