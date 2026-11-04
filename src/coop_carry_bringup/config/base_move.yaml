@@ -1,0 +1,19 @@
+carry_base_move:
+  ros__parameters:
+    mode: swerve
+    # 월드 XY 방향. 음수 distance로 반대 방향 주행 가능.
+    direction_x: 0.0
+    direction_y: 1.0
+    distance: 2.0
+    duration: 10.0
+    max_speed: 0.4
+    # 정확한 도착 위치가 아니라 패턴 종료와 두 로봇 정지를 확인한다.
+    stop_linear: 0.01
+    stop_angular: 0.02
+    stop_wheel: 0.1
+    settle_time: 0.5
+    min_travel: 0.01
+    feedback_timeout: 0.5
+    clock_timeout: 2.0
+    stop_timeout: 10.0
+    wall_timeout: 180.0

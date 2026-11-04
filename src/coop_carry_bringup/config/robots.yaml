@@ -1,5 +1,8 @@
+# fixed는 기존 고정 베이스 시험용, swerve는 실제 바퀴 주행용.
+base_mode: swerve
+
 initial_joint_positions:
-  # Inside both Gazebo and Cyclo limits; avoids the invalid all-zero elbow pose.
+  # 두 로봇이 공유하는 초기 팔 관절 각도(rad). Cyclo 모델 제한은 별도 확인한다.
   arm_r_joint2: 0
   arm_l_joint2: 0
   arm_r_joint4: 0
@@ -7,14 +10,23 @@ initial_joint_positions:
   arm_r_joint6: 0
   arm_l_joint6: 0
 robots:
-  # 박스(월드 원점)를 가운데 두고 마주 봄. 손(base 기준 x 0.40)이 박스 각자 쪽 옆면에 오는 거리
-  - {name: robot1, x: -0.55, y: 0.0, z: 0.2, yaw: 0.0}
-  - {name: robot2, x: 0.55, y: 0.0, z: 0.2, yaw: 3.14159265}
+  # Gazebo 월드에서의 배치: 위치는 m, yaw는 rad.
+  # [김민기] 박스(월드 원점)를 가운데 두고 마주 봄. 손(base 기준 x 0.40)이 박스 각자 쪽 옆면에 오는 거리
+  - name: robot1
+    x: -0.55
+    y: 0.0
+    z: 0.2
+    yaw: 0.0
+
+  - name: robot2
+    x: 0.55
+    y: 0.0
+    z: 0.2
+    yaw: 3.14159265
 # --- 김민기 하위 제어 (토크 임피던스) ---------------------------------------
 # position: 현대 기본(위치 서보만) / effort: 토크 경로 + 물리 1 ms + 외력 시험 플러그인 + 박스
 control_mode: effort
 gripper_effort: 100.0              # 그리퍼 관절 effort 한계(시뮬). 1000 → 손잡이에 파고들어 RTF 0.007. 5·20·100 모두 손가락이 q≈0.53에서 멈춤(정렬 문제로 추정)
-base_motion: true                  # effort 모드: 베이스를 월드 y로 옮길 수 있게(물리 모델만 슬라이드 관절, 현대 주행 대역)
 state_rate: 500                    # effort 모드 관절 상태·토크 루프 주기 [Hz] (문서 #8: D < 2Λ/T)
 box:
   robot: robot1

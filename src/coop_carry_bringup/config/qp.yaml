@@ -1,19 +1,28 @@
-# Only parameters declared by the installed bimanual MoveL node.
-# Topic and model paths are supplied per robot by the launch file.
+# 토픽과 모델 경로는 model_factory.qp_parameters()에서 로봇별로 지정한다.
+
+# 제어 주기와 궤적 설정
 control_frequency: 100.0
 time_step: 0.01
 trajectory_time: 0.0
+
+# 손끝 위치·방향 추종과 QP 가중치
 kp_position: 50.0
 kp_orientation: 50.0
 weight_position: 10.0
 weight_orientation: 1.0
 weight_damping: 0.1
+
+# 충돌 회피 관련 설정
 collision_buffer: 0.05
 collision_safe_distance: 0.02
 slack_penalty: 1000.0
 cbf_alpha: 50.0
+
+# 관절 상태 제한과 리프트 고정
 joint_state_timeout: 0.5
 lift_vel_bound: 0.0
+
+# Cyclo 모델의 손끝 프레임과 그리퍼 관절 이름
 r_gripper_name: end_effector_r_link
 l_gripper_name: end_effector_l_link
 right_gripper_joint: gripper_r_joint1

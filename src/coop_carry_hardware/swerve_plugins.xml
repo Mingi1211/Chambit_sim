@@ -1,0 +1,7 @@
+<library path="coop_carry_remote_swerve">
+  <class name="coop_carry_hardware/RemoteSwerveSystem"
+         type="coop_carry_hardware::RemoteSwerveSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>Simulation steering position and wheel velocity hardware.</description>
+  </class>
+</library>

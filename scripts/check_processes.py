@@ -20,6 +20,9 @@ for p in Path('/proc').iterdir():
   found.append({'pid':int(p.name),'executable':executable,
    'remote_hardware':'libcoop_carry_remote_hardware.so' in maps,
    'gazebo_actuator':'libcoop_carry_gazebo_actuator.so' in maps,
+   'swerve_hardware':'libcoop_carry_remote_swerve.so' in maps,
+   'gazebo_swerve':'libcoop_carry_gazebo_swerve.so' in maps,
+   'swerve_controller':'libffw_swerve_drive_controller.so' in maps,
    'gz_ros2_control':'libgz_ros2_control' in maps})
  except (FileNotFoundError,PermissionError,ProcessLookupError): pass
 print(json.dumps({'pid_namespace':os.readlink('/proc/self/ns/pid'),'processes':found}))
@@ -38,12 +41,15 @@ for role in ('gazebo','robot1','robot2'):
  if role=='gazebo':
   servers=[p for p in ps if p['executable']=='coop_gazebo_server']
   assert len(servers)==1 and servers[0]['gazebo_actuator']
-  assert not any(p['executable']=='ros2_control_node' or p['remote_hardware'] or p['gz_ros2_control'] for p in ps)
+  assert not any(p['executable']=='ros2_control_node' or p['remote_hardware'] or p['swerve_hardware'] or p['swerve_controller'] or p['gz_ros2_control'] for p in ps)
  else:
   managers=[p for p in ps if p['executable']=='ros2_control_node']
   qps=[p for p in ps if p['executable']=='ai_worker_bimanual_movel_controller_node']
   assert len(managers)==len(qps)==1,(role,ps)
   assert managers[0]['remote_hardware'] and not managers[0]['gz_ros2_control'] and not managers[0]['gazebo_actuator']
+  assert not managers[0]['gazebo_swerve']
+  if any(p['gazebo_swerve'] for p in results['gazebo']['processes']):
+   assert managers[0]['swerve_hardware'] and managers[0]['swerve_controller']
 assert len({r['pid_namespace'] for r in results.values()})==3
 assert len({r['image_id'] for r in results.values()})==1
 print(json.dumps({'result':'PASS','containers':results},indent=2))

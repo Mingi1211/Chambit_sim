@@ -1,6 +1,7 @@
 #include <exception>
 #include <iostream>
 #include <stdexcept>
+
 #include "gz/common/SignalHandler.hh"
 #include "gz/sim/Server.hh"
 #include "gz/sim/ServerConfig.hh"
@@ -26,7 +27,7 @@ int main(int argc, char ** argv)
       // An embedded Server needs its own signal-to-Stop callback when no
       // gz_ros2_control plugin initializes ROS in the server process.
       gz::common::SignalHandler signals;
-      if (!signals.AddCallback([&server](int) {server.Stop();})) {
+      if (!signals.AddCallback([&server](int) { server.Stop(); })) {
         throw std::runtime_error("Could not install Gazebo shutdown signal handler");
       }
       if (!server.Run(true, 0, false)) {
