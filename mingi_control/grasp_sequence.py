@@ -179,6 +179,18 @@ def spin(sec):
         rclpy.spin_once(n, timeout_sec=0.01)
 
 
+def spin_sim(sec, wall_max=120.0):
+    """시뮬 시간으로 sec만큼 기다림. 현대 QP의 이동 시간 T는 시뮬 시간이라, RTF < 1(GUI·스워브)에서 벽시계로 기다리면
+    궤적이 덜 끝난 채 오차를 재서 재시도가 쌓이다 중단됨 (11/5: GUI 실행에서 안전 접근 자세 오차 19.9 mm로 중단)"""
+    t_wall = time.time()
+    rclpy.spin_once(n, timeout_sec=0.05)
+    t0 = n.get_clock().now().nanoseconds * 1e-9
+    if t0 == 0.0:                       # /clock 미수신 → 벽시계로
+        return spin(sec)
+    while n.get_clock().now().nanoseconds * 1e-9 - t0 < sec and time.time() - t_wall < wall_max:
+        rclpy.spin_once(n, timeout_sec=0.01)
+
+
 def ee(r, s):
     """현대 robot_state_publisher가 내보내는 TF에서 실제 손끝 자세를 읽는다."""
     transform = tf_buffer.lookup_transform(f'{r}/base_link', f'{r}/end_effector_{s}_link', Time()).transform
@@ -287,7 +299,7 @@ def send(cmd, T, orientations=None):
             g.time_from_start.sec += 1
             g.time_from_start.nanosec = 0
         p.publish(g)
-    spin(T + 1.5)
+    spin_sim(T + 1.5)
 
 
 def grip(values):
