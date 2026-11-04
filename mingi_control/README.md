@@ -125,3 +125,13 @@ cd ~/Desktop/Chambit_Sim && source scripts/environment.bash && cd mingi_control
 - 원인: 그리퍼가 q≈0.53에서 멈춤(effort 20·100 같은 값 → 힘 부족이 아니라 손가락이 손잡이에 한쪽만 닿는 정렬 문제로 추정).
   정상 파지(손잡이 30 mm)는 q≈0.85.
 - 해결: grasp_sequence 정렬 수정(Codex, 커밋 e6f5d49) → 운반 끝까지 성공, 박스 최종 (−0.006, 2.018, 1.050) = 받침대 위
+
+## 10. 11/4 추가: 내려놓은 뒤 팔 빼기 (transport_scenario.py) — Ubuntu 미검증
+
+- 이전 버전은 그리퍼를 연 뒤 위치 제어로 복귀만 하고 끝 → 손이 손잡이 자리에 그대로 남아 "잡은 채 끝난" 것처럼 보였음
+- 추가: 6 팔 빼기 — 각 base_link −x로 `--retract`(12 cm) 빼면서 `--retract_up`(3 cm) 올림
+  - 기본 `--retract_mode qp`: 위치 제어로 복귀한 뒤 TF로 현재 손 자세를 읽어 현대 QP(MoveL)로 이동 (놓은 뒤 토크 모드 손목 떨림 회피)
+  - `--retract_mode impedance`: 토크 모드 그대로 목표만 이동 → 끝나면 위치 복귀 (QP 쪽이 안 될 때 대안)
+- 8 판정: 박스 최종 위치가 받침대(table_size) 안이고 높이 차 < 2 cm, 그리퍼 연 뒤 박스 이동 < 1 cm면 성공
+- 트러블슈팅 후보: ① 위치 복귀 직후 팔이 튐(현대 QP의 직전 명령값이 오래된 경우) → impedance 방식으로 비교
+  ② 손가락이 손잡이에 걸려 박스가 끌려옴 → `--retract_up` 키우기·그리퍼 완전히 열렸는지(q≈0) 확인 ③ 팔 빼기 오차 > 2 cm → QP 목표 수신·adapter ready 확인
