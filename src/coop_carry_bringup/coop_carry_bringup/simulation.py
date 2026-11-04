@@ -161,6 +161,27 @@ def _add_effort_path(physics, gazebo, actuator, robot):
     for plugin in gazebo.findall("plugin"):
         if plugin.get("name") == "gz::sim::systems::JointStatePublisher":
             plugin.find("update_rate").text = str(robot.get("state_rate", 100))
+    # 파지 고정: 손가락-손잡이 메시 접촉이 두 로봇·바퀴-바닥과 한 덩어리로 묶이면 물리 계산이 폭주(RTF 0.01, 11/5).
+    # 접촉 감지로 파지를 확인한 뒤 손목 링크↔박스를 고정 구속으로 바꾸고(attach), 놓을 때 푼다(detach).
+    # Gazebo DetachableJoint는 시작할 때 붙은 상태로 만들어지므로 grasp_sequence가 시작하자마자 detach한다
+    for side in ("r", "l"):
+        plugin = ET.SubElement(
+            gazebo,
+            "plugin",
+            {
+                "filename": "gz-sim-detachable-joint-system",
+                "name": "gz::sim::systems::DetachableJoint",
+            },
+        )
+        for key, value in {
+            "parent_link": f"arm_{side}_link7",
+            "child_model": "box",
+            "child_link": "link",
+            "attach_topic": f"/sim/{name}/{side}/attach",
+            "detach_topic": f"/sim/{name}/{side}/detach",
+            "suppress_child_warning": "true",
+        }.items():
+            ET.SubElement(plugin, key).text = value
     return [
         dict(
             ros_topic_name=f"/sim/{name}/effort",
@@ -205,7 +226,7 @@ def configure_effort_world(world, robots_file):
     bx, by, bz = box['center_base']                      # 로봇 base_link 기준 박스 중심
     wx = base['x'] + math.cos(yaw) * bx - math.sin(yaw) * by
     wy = base['y'] + math.sin(yaw) * bx + math.cos(yaw) * by
-    wz = base['z'] + bz
+    wz = base['z'] + bz                                 # 스워브는 robots.yaml z 0 (바닥에 선 base_link)
     sx, sy, sz = box['size']
     m, mu = float(box['mass']), float(box['mu'])
     ixx, iyy, izz = m * (sy**2 + sz**2) / 12, m * (sx**2 + sz**2) / 12, m * (sx**2 + sy**2) / 12

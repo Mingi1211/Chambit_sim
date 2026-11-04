@@ -11,22 +11,23 @@ initial_joint_positions:
   arm_l_joint6: 0
 robots:
   # Gazebo 월드에서의 배치: 위치는 m, yaw는 rad.
-  # [김민기] 박스(월드 원점)를 가운데 두고 마주 봄. 손(base 기준 x 0.40)이 박스 각자 쪽 옆면에 오는 거리
+  # [김민기] 박스(월드 원점)를 가운데 두고 마주 봄. 손(base 기준 x 0.40)이 박스 각자 쪽 옆면에 오는 거리.
+  #   z 0: 스워브 베이스는 바닥에 내려앉아 base_link z ≈ 0 (0.2에서 떨어뜨리면 시작 시 붙어 있는 손-박스 고정 구속이 박스를 끌어내림)
   - name: robot1
     x: -0.55
     y: 0.0
-    z: 0.2
+    z: 0.0
     yaw: 0.0
 
   - name: robot2
     x: 0.55
     y: 0.0
-    z: 0.2
+    z: 0.0
     yaw: 3.14159265
 # --- 김민기 하위 제어 (토크 임피던스) ---------------------------------------
 # position: 현대 기본(위치 서보만) / effort: 토크 경로 + 물리 1 ms + 외력 시험 플러그인 + 박스
 control_mode: effort
-gripper_effort: 100.0              # 그리퍼 관절 effort 한계(시뮬). 1000 → 손잡이에 파고들어 RTF 0.007. 5·20·100 모두 손가락이 q≈0.53에서 멈춤(정렬 문제로 추정)
+gripper_effort: 100.0              # 그리퍼 관절 effort 한계(시뮬). 1000이면 손잡이에 파고들어 RTF 0.007. 접촉 감지 후에는 손-박스 고정 구속으로 하중 전달(simulation.py)
 state_rate: 500                    # effort 모드 관절 상태·토크 루프 주기 [Hz] (문서 #8: D < 2Λ/T)
 box:
   robot: robot1

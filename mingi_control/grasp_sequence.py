@@ -46,7 +46,8 @@ ap.add_argument('--grasp_z_offset', type=float, default=0.023,
                 help='FK에서 확인한 닫힘축 중심 오차 보정 [m], base_link +z')
 ap.add_argument('--forward_step', type=float, default=0.02, help='전진 중간 확인 간격 [m]')
 ap.add_argument('--z_up', type=float, default=0.06, help='회전할 때 손잡이보다 위로 띄우는 높이')
-ap.add_argument('--squeeze', type=float, default=0.05, help='접촉 위치에서 더 닫는 양 [rad]')
+ap.add_argument('--squeeze', type=float, default=0.05, help='접촉 위치에서 더 닫는 양 [rad] (함수 버전용)')
+ap.add_argument('--release_gap', type=float, default=0.03, help='고정 구속 연결 뒤 손가락을 접촉 위치에서 푸는 양 [rad]')
 a = ap.parse_args()
 for name in ('forward_step', 'approach_distance'):
     value = getattr(a, name)
@@ -54,6 +55,16 @@ for name in ('forward_step', 'approach_distance'):
         ap.error(f'--{name}은 유한한 양수여야 합니다')
 QUAT = (-0.5, -0.5, 0.5, 0.5)       # 손끝이 +x(박스 쪽), 손가락은 상하로 닫힘 — 두 팔 모두 IK 도달 확인
 OPEN, CLOSED = 0.0, 1.1
+
+
+def weld(attach):
+    """[문서 밖] Gazebo 손-박스 고정 구속 (simulation.py의 DetachableJoint). 파지 접촉 확인 뒤 attach, 시작·놓을 때 detach"""
+    env = dict(os.environ, GZ_PARTITION=os.environ.get('GZ_PARTITION', 'internship_dual'))
+    for r in a.robots:
+        for s in 'rl':
+            subprocess.run(['gz', 'topic', '-t', f'/sim/{r}/{s}/{"attach" if attach else "detach"}',
+                            '-m', 'gz.msgs.Empty', '-p', ' '], env=env, timeout=5.0, check=False)
+    print(f'[{time.strftime("%H:%M:%S")}]   손-박스 고정 구속 {"연결" if attach else "해제"}', flush=True)
 
 
 def load_grasp_targets():
@@ -67,17 +78,22 @@ def load_grasp_targets():
         return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
 
     env = dict(os.environ, GZ_PARTITION=os.environ.get('GZ_PARTITION', 'internship_dual'))
-    pose = subprocess.run(['gz', 'model', '-m', 'box', '-p'], capture_output=True,
-                          text=True, env=env, timeout=5.0, check=True).stdout
-    pose_match = re.search(
-        r'Pose \[ XYZ \(m\) \] \[ RPY \(rad\) \]:\s*\n\s*'
-        r'\[([-\d.e+ ]+)\]\s*\n\s*\[([-\d.e+ ]+)\]', pose)
-    if not pose_match:
-        raise RuntimeError(f'Gazebo box pose 형식을 읽지 못했습니다: {pose.strip()}')
-    box_center_world = np.fromstring(pose_match.group(1), sep=' ')
-    rpy = np.fromstring(pose_match.group(2), sep=' ')
-    if box_center_world.size != 3 or rpy.size != 3:
-        raise RuntimeError(f'Gazebo box 위치/방향이 잘못되었습니다: {pose_match.groups()}')
+
+    def gz_pose(model):
+        """Gazebo 실측 모델 위치·RPY. 스워브 베이스는 바닥에 내려앉아 robots.yaml z와 다르므로 실측을 쓴다"""
+        pose = subprocess.run(['gz', 'model', '-m', model, '-p'], capture_output=True,
+                              text=True, env=env, timeout=5.0, check=True).stdout
+        pose_match = re.search(
+            r'Pose \[ XYZ \(m\) \] \[ RPY \(rad\) \]:\s*\n\s*'
+            r'\[([-\d.e+ ]+)\]\s*\n\s*\[([-\d.e+ ]+)\]', pose)
+        if not pose_match:
+            raise RuntimeError(f'Gazebo {model} pose 형식을 읽지 못했습니다: {pose.strip()}')
+        xyz, rpy = np.fromstring(pose_match.group(1), sep=' '), np.fromstring(pose_match.group(2), sep=' ')
+        if xyz.size != 3 or rpy.size != 3:
+            raise RuntimeError(f'Gazebo {model} 위치/방향이 잘못되었습니다: {pose_match.groups()}')
+        return xyz, rpy
+
+    box_center_world, rpy = gz_pose('box')
     roll, pitch, yaw = rpy
     cr, sr, cp, sp, cy, sy = math.cos(roll), math.sin(roll), math.cos(pitch), math.sin(pitch), math.cos(yaw), math.sin(yaw)
     R_box = np.array([
@@ -92,9 +108,8 @@ def load_grasp_targets():
     center_z = float(handle.get('z', 0.0))
     result, handle_centers = {}, {}
     for robot_name in a.robots:
-        robot = robots[robot_name]
-        R_robot = rotation(float(robot.get('yaw', 0.0)))
-        robot_world = np.array([robot['x'], robot['y'], robot['z']], dtype=float)
+        robot_world, robot_rpy = gz_pose(robot_name)
+        R_robot = rotation(float(robot_rpy[2]))
         # 박스 local x 방향에서 이 로봇이 바라보는 끝면의 부호.
         robot_in_box = R_box.T @ (robot_world - box_center_world)
         face_sign = -1.0 if robot_in_box[0] < 0 else 1.0
@@ -124,6 +139,8 @@ def load_grasp_targets():
     return result, handle_centers
 
 
+weld(False)            # 시작 시 붙어 있는 구속을 먼저 풀고 박스가 받침대에 내려앉은 뒤 측정
+time.sleep(3.0)
 grasp_targets, handle_centers = load_grasp_targets()
 approach_targets = {
     key: target + np.array([-a.approach_distance, 0.0, 0.0])
@@ -437,10 +454,15 @@ while len(contact) < len(pub_grip) and time.time() - t0 < 5.0:
 miss = [k for k, q in contact.items() if q >= CLOSED - 0.1] + [k for k in pub_grip if k not in contact]
 if miss:
     say(f'파지 실패 {miss} — 손잡이 위치와 --tool_offset_x를 확인하세요. 토크 전환 안 함')
+    n.destroy_node()
+    rclpy.shutdown()
+    raise SystemExit(1)
 else:
     for r, s in pub_grip:
         report_finger_alignment(r, s, f'접촉 q={contact[r, s]:.3f}')
-    grip({k: q + a.squeeze for k, q in contact.items()})       # 접촉 위치 + 조금 더 → 쥐는 힘 제한
+    weld(True)
+    # 고정 구속이 하중을 받으므로 손가락은 접촉 위치에서 살짝 풀어 둠(손잡이를 감싼 모양 유지, 접촉 계산 최소화)
+    grip({k: q - a.release_gap for k, q in contact.items()})
     spin(1.0)
     say('5 고정 완료 → 6 토크(임피던스) 모드 전환')
     for r in a.robots:
