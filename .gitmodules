@@ -1,0 +1,13 @@
+[submodule "src/ai_worker"]
+	path = src/ai_worker
+	url = https://github.com/ROBOTIS-GIT/ai_worker.git
+[submodule "src/cyclo_control"]
+	path = src/cyclo_control
+	url = https://github.com/ROBOTIS-GIT/cyclo_control.git
+[submodule "src/robotis_interfaces"]
+	path = src/robotis_interfaces
+	url = https://github.com/ROBOTIS-GIT/robotis_interfaces.git
+[submodule "src/realsense-ros"]
+	path = src/realsense-ros
+	url = https://github.com/IntelRealSense/realsense-ros.git
+	branch = ros2-master
