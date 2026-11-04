@@ -46,8 +46,7 @@ ap.add_argument('--grasp_z_offset', type=float, default=0.023,
                 help='FK에서 확인한 닫힘축 중심 오차 보정 [m], base_link +z')
 ap.add_argument('--forward_step', type=float, default=0.02, help='전진 중간 확인 간격 [m]')
 ap.add_argument('--z_up', type=float, default=0.06, help='회전할 때 손잡이보다 위로 띄우는 높이')
-ap.add_argument('--squeeze', type=float, default=0.05, help='접촉 위치에서 더 닫는 양 [rad] (함수 버전용)')
-ap.add_argument('--release_gap', type=float, default=0.03, help='고정 구속 연결 뒤 손가락을 접촉 위치에서 푸는 양 [rad]')
+ap.add_argument('--squeeze', type=float, default=0.05, help='접촉 위치에서 더 닫는 목표 [rad] — 쥐는 힘은 gripper_effort가 정함')
 a = ap.parse_args()
 for name in ('forward_step', 'approach_distance'):
     value = getattr(a, name)
@@ -55,16 +54,6 @@ for name in ('forward_step', 'approach_distance'):
         ap.error(f'--{name}은 유한한 양수여야 합니다')
 QUAT = (-0.5, -0.5, 0.5, 0.5)       # 손끝이 +x(박스 쪽), 손가락은 상하로 닫힘 — 두 팔 모두 IK 도달 확인
 OPEN, CLOSED = 0.0, 1.1
-
-
-def weld(attach):
-    """[문서 밖] Gazebo 손-박스 고정 구속 (simulation.py의 DetachableJoint). 파지 접촉 확인 뒤 attach, 시작·놓을 때 detach"""
-    env = dict(os.environ, GZ_PARTITION=os.environ.get('GZ_PARTITION', 'internship_dual'))
-    for r in a.robots:
-        for s in 'rl':
-            subprocess.run(['gz', 'topic', '-t', f'/sim/{r}/{s}/{"attach" if attach else "detach"}',
-                            '-m', 'gz.msgs.Empty', '-p', ' '], env=env, timeout=5.0, check=False)
-    print(f'[{time.strftime("%H:%M:%S")}]   손-박스 고정 구속 {"연결" if attach else "해제"}', flush=True)
 
 
 def load_grasp_targets():
@@ -139,8 +128,6 @@ def load_grasp_targets():
     return result, handle_centers
 
 
-weld(False)            # 시작 시 붙어 있는 구속을 먼저 풀고 박스가 받침대에 내려앉은 뒤 측정
-time.sleep(3.0)
 grasp_targets, handle_centers = load_grasp_targets()
 approach_targets = {
     key: target + np.array([-a.approach_distance, 0.0, 0.0])
@@ -460,9 +447,7 @@ if miss:
 else:
     for r, s in pub_grip:
         report_finger_alignment(r, s, f'접촉 q={contact[r, s]:.3f}')
-    weld(True)
-    # 고정 구속이 하중을 받으므로 손가락은 접촉 위치에서 살짝 풀어 둠(손잡이를 감싼 모양 유지, 접촉 계산 최소화)
-    grip({k: q - a.release_gap for k, q in contact.items()})
+    grip({k: q + a.squeeze for k, q in contact.items()})       # 접촉 위치보다 더 닫는 목표 → 그리퍼 서보가 effort 한계(쥐는 힘)까지 조임
     spin(1.0)
     say('5 고정 완료 → 6 토크(임피던스) 모드 전환')
     for r in a.robots:

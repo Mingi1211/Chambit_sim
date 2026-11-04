@@ -35,6 +35,8 @@ class BaseFeedback:
     y: float = 0.0
     yaw: float = 0.0
     linear_speed: float = 0.0
+    vx: float = 0.0   # [김민기] 월드 기준 차체 속도 (정렬 판정용, 차체 좌표 twist를 yaw로 회전)
+    vy: float = 0.0
     angular_speed: float = 0.0
     wheel_speed: float = 0.0
     received: float = 0.0
@@ -153,6 +155,8 @@ class SwerveBaseInterface:
             yaw_of(pose.orientation),
         )
         state.linear_speed = math.sqrt(sum(value**2 for value in values[7:10]))
+        c, si = math.cos(state.yaw), math.sin(state.yaw)   # twist는 차체 좌표 → 월드
+        state.vx, state.vy = c * values[7] - si * values[8], si * values[7] + c * values[8]
         state.angular_speed = math.sqrt(sum(value**2 for value in values[10:13]))
         state.stamp, state.received = stamp, time.monotonic()
 

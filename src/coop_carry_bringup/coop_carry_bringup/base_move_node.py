@@ -69,6 +69,13 @@ class BaseMoveNode(Node):
         ]
         self.initial_positions = {}
         self.initial_yaws = {}
+        # [김민기 11/5] 바퀴 정렬 단계: 스워브 제어기는 조향이 이동 방향에 정렬될 때까지 구동을 막는데(정지 시 오차 0.01 rad),
+        # 10초 속도 패턴은 시작 명령과 동시에 흐르므로 정렬 시간만큼 명령 거리가 사라짐(새 시뮬 첫 주행 2 m → 0.65~0.72 m 실측).
+        # → 작은 속도로 방향만 주고, 두 로봇 차체가 실제로 움직이기 시작(= 두 로봇 모두 정렬 통과)한 순간 공통 10초 타이머 시작
+        self.align_speed = self.declare_parameter("align_speed", 0.005).value      # [m/s] 정렬 중 방향 지령
+        self.align_detect = self.declare_parameter("align_detect", 0.003).value   # [m/s] 차체 실측 속도 > 이 값 = 구동 시작
+        self.align_timeout = self.declare_parameter("align_timeout", 15.0).value  # [s, 시뮬 시간]
+        self.aligning = None
         self.last_tick = self.created_at = time.monotonic()
         self.last_status = 0.0
         self.reported_state = None
@@ -145,11 +152,35 @@ class BaseMoveNode(Node):
             self.initial_yaws = {
                 robot: state.yaw for robot, state in self.interface.states.items()
             }
-            response.success, response.message = self.sequence.start(
-                self.sim_time(), time.monotonic()
-            )
+            if self.sequence.state != "ARMED" or not self.sequence.lift_level:
+                response.success, response.message = False, "Start rejected: confirm lift first"
+            else:
+                self.aligning = self.sim_time()
+                response.success = True
+                response.message = "Manual start accepted; aligning wheels before the 10 s pattern"
+                self.get_logger().info("[SWERVE] ALIGNING: 두 로봇 바퀴 정렬 후 공통 타이머 시작")
         self.report()
         return response
+
+    def align_tick(self):
+        """정렬 단계: 방향만 작은 속도로 지령. 두 로봇 모두 차체가 움직이면 속도 패턴 시작"""
+        norm = math.hypot(self.settings.direction_x, self.settings.direction_y)
+        sign = math.copysign(1.0, self.settings.distance)
+        self.interface.command(
+            sign * self.align_speed * self.settings.direction_x / norm,
+            sign * self.align_speed * self.settings.direction_y / norm,
+            self.initial_yaws,
+        )
+        # 이동 방향 성분 속도로 판정 (정렬 중 차체가 반대쪽으로 수 mm/s 미끄러지는 것은 구동 아님, 11/5 실측)
+        ux, uy = sign * self.settings.direction_x / norm, sign * self.settings.direction_y / norm
+        engaged = all(st.vx * ux + st.vy * uy > self.align_detect for st in self.interface.states.values())
+        elapsed = self.sim_time() - self.aligning
+        if engaged or elapsed > self.align_timeout:
+            self.get_logger().info(
+                f"[SWERVE] {'정렬 완료' if engaged else '정렬 시간 초과'} ({elapsed:.2f} s) → 10초 패턴 시작"
+            )
+            self.aligning = None
+            self.sequence.start(self.sim_time(), time.monotonic())
 
     def reset(self, request, response):
         response.success, response.message = self.sequence.reset()
@@ -231,7 +262,9 @@ class BaseMoveNode(Node):
                 self.stopped(),
                 self.moved() if self.initial_positions else False,
             )
-            if self.sequence.state == "MOVING":
+            if self.aligning is not None and self.sequence.state == "ARMED":
+                self.align_tick()
+            elif self.sequence.state == "MOVING":
                 speed = self.sequence.speed(self.sim_time())
                 norm = math.hypot(self.settings.direction_x, self.settings.direction_y)
                 self.interface.command(

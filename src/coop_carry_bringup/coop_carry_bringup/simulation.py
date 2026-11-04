@@ -161,27 +161,24 @@ def _add_effort_path(physics, gazebo, actuator, robot):
     for plugin in gazebo.findall("plugin"):
         if plugin.get("name") == "gz::sim::systems::JointStatePublisher":
             plugin.find("update_rate").text = str(robot.get("state_rate", 100))
-    # 파지 고정: 손가락-손잡이 메시 접촉이 두 로봇·바퀴-바닥과 한 덩어리로 묶이면 물리 계산이 폭주(RTF 0.01, 11/5).
-    # 접촉 감지로 파지를 확인한 뒤 손목 링크↔박스를 고정 구속으로 바꾸고(attach), 놓을 때 푼다(detach).
-    # Gazebo DetachableJoint는 시작할 때 붙은 상태로 만들어지므로 grasp_sequence가 시작하자마자 detach한다
-    for side in ("r", "l"):
-        plugin = ET.SubElement(
-            gazebo,
-            "plugin",
-            {
-                "filename": "gz-sim-detachable-joint-system",
-                "name": "gz::sim::systems::DetachableJoint",
-            },
-        )
-        for key, value in {
-            "parent_link": f"arm_{side}_link7",
-            "child_model": "box",
-            "child_link": "link",
-            "attach_topic": f"/sim/{name}/{side}/attach",
-            "detach_topic": f"/sim/{name}/{side}/detach",
-            "suppress_child_warning": "true",
-        }.items():
-            ET.SubElement(plugin, key).text = value
+    # 손끝 패드 충돌 모델: 손끝(r2/l2) STL 메시 대신 같은 크기의 직육면체(메시 경계 상자, 11/5 계산)로 바꿈.
+    # 메시-상자 접촉은 접촉점이 많아져 두 로봇·박스·바퀴-바닥이 한 덩어리로 묶일 때 물리 계산이 폭주(RTF 0.01).
+    # 쥐는 힘·마찰·미끄러짐은 그대로 접촉 역학으로 계산된다(고정 구속 없음). 마찰계수는 박스와 같은 μ
+    pads = {"r2": ((0.0, 0.00705, 0.0126), (0.026, 0.0219, 0.0548)),
+            "l2": ((0.0, -0.00705, 0.0126), (0.026, 0.0219, 0.0548))}
+    for link in physics.findall("link"):
+        finger = link.get("name", "").rsplit("_", 1)[-1]
+        if not (link.get("name", "").startswith("gripper_") and finger in pads):
+            continue
+        (cx, cy, cz), (sx, sy, sz) = pads[finger]
+        for collision in link.findall("collision"):
+            link.remove(collision)
+        collision = ET.SubElement(link, "collision")
+        ET.SubElement(collision, "origin", {"xyz": f"{cx} {cy} {cz}", "rpy": "0 0 0"})
+        ET.SubElement(ET.SubElement(collision, "geometry"), "box", {"size": f"{sx} {sy} {sz}"})
+        reference = ET.SubElement(physics, "gazebo", {"reference": link.get("name")})
+        ET.SubElement(reference, "mu1").text = str(robot.get("finger_mu", 1.0))
+        ET.SubElement(reference, "mu2").text = str(robot.get("finger_mu", 1.0))
     return [
         dict(
             ros_topic_name=f"/sim/{name}/effort",

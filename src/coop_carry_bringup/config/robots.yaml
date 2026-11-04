@@ -36,5 +36,5 @@ box:
   mass: 2.0                        # [kg] 두 로봇이 나눠 듦
   mu: 1.0
   handle: {y: 0.276, protrude: 0.05, width: 0.08, thickness: 0.030} # 손잡이 중심 간격 0.552 m; 박스 y 반폭 0.33 m 안에 배치
-  place: {dx: 0.0, dy: 2.0}        # 내려놓을 받침대: 같은 높이, 월드 y로 2 m 옆
+  place: {dx: 0.0, dy: 2.0}        # 내려놓을 받침대: 같은 높이, 월드 y로 2 m 옆 (현대 base_move.yaml distance와 같게)
   table_size: [0.30, 0.40]         # 박스 아래 중앙 받침대

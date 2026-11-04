@@ -35,7 +35,7 @@ from tf2_ros import Buffer, TransformListener
 ap = argparse.ArgumentParser()
 ap.add_argument('--leader', default='robot1')
 ap.add_argument('--follower', default='robot2')
-ap.add_argument('--dy', type=float, default=2.0, help='판정용: 현대 base_move.yaml distance와 같게 [m]')
+ap.add_argument('--dy', type=float, default=2.0, help='판정용: robots.yaml box.place.dy (받침대 위치) [m]')
 ap.add_argument('--base_timeout', type=float, default=300.0, help='베이스 이동 완료 대기 [s, wall]')
 ap.add_argument('--lift', type=float, default=0.05)
 ap.add_argument('--box_mass', type=float, default=2.0)
@@ -157,14 +157,9 @@ step('   마지막 1 cm', a.move + 1.0)
 for r in robots:
     put(r, 'weight', 0.0)
 step('   피드포워드 끄기 (무게를 받침대로)', 3.0)
-env_gz = dict(os.environ, GZ_PARTITION=os.environ.get('GZ_PARTITION', 'internship_dual'))
-for r in robots:   # [문서 밖] 손-박스 고정 구속 해제 (grasp_sequence에서 연결)
-    for s in 'rl':
-        subprocess.run(['gz', 'topic', '-t', f'/sim/{r}/{s}/detach', '-m', 'gz.msgs.Empty', '-p', ' '],
-                       env=env_gz, timeout=5.0, check=False)
 for r in robots:
     put(r, 'gripper', 0.0)
-step('   고정 구속 해제 → 그리퍼 열기', 2.0)
+step('   그리퍼 열기', 2.0)
 
 
 def ee(r, s):
