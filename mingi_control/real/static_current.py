@@ -11,17 +11,20 @@
   noise : 지금 자세 그대로 duration초 기록 (움직이지 않음) — 제어 주기·전류 잡음
   sweep : --joint 관절을 --poses 각마다 위·아래 접근 → 각 hold초 기록
 
-출력: /workspace/mingi/<시각>_<mode>_<arm>.csv (+ robot_description.urdf 한 번 저장)
+출력: --out - (기본) 이면 CSV를 표준출력으로 → 내 PC에서 ssh로 받아 로컬 파일로 저장 (로봇 PC에 아무것도 안 남김)
+      --out <폴더> 이면 그 폴더에 저장.  안내 문구는 모두 stderr
   열: t, phase, target, dir, 관절별 q·dq·I (I = /dynamic_joint_states 'Present Current', 단위 미확인 — 그대로 저장)
 
-사용 (로봇 컨테이너 안, bringup 켜진 상태):
-  python3 static_current.py noise --arm l --duration 30
-  python3 static_current.py sweep --arm l --joint 4 --poses 0 -0.4 -0.8 -1.2 --delta 0.1
+사용 (내 PC에서, bringup 켜진 상태 — 스크립트를 ssh 표준입력으로 보내 컨테이너 안에서 실행):
+  ssh robotis@<로봇> "docker exec -i ai_worker bash -ic 'python3 - noise --arm l --duration 30'" < static_current.py | sed -n '/^t,phase/,$p' > noise_l.csv
+  mode urdf: 실물 robot_description을 표준출력으로 (Pinocchio 중력 계산용)
 """
 import argparse
 import csv
 import os
+import sys
 import time
+from functools import partial
 
 import rclpy
 from control_msgs.action import FollowJointTrajectory
@@ -34,7 +37,7 @@ from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectoryPoint
 
 ap = argparse.ArgumentParser()
-ap.add_argument('mode', choices=['noise', 'sweep'])
+ap.add_argument('mode', choices=['noise', 'sweep', 'urdf'])
 ap.add_argument('--arm', choices=['r', 'l'], default='l')
 ap.add_argument('--duration', type=float, default=30.0, help='noise 기록 시간 [s]')
 ap.add_argument('--joint', type=int, default=4, help='sweep 관절 번호 1~7')
@@ -42,8 +45,9 @@ ap.add_argument('--poses', type=float, nargs='+', default=[0.0, -0.4, -0.8, -1.2
 ap.add_argument('--delta', type=float, default=0.1, help='위·아래 접근 거리 [rad]')
 ap.add_argument('--move', type=float, default=4.0, help='각 이동 시간 [s] (천천히)')
 ap.add_argument('--hold', type=float, default=4.0, help='정지 후 기록 시간 [s] (앞 1 s는 안정화로 표시)')
-ap.add_argument('--out', default='/workspace/mingi')
+ap.add_argument('--out', default='-', help="'-' = 표준출력 (기본), 아니면 저장 폴더")
 a = ap.parse_args()
+print = partial(print, file=sys.stderr)   # noqa: A001 — 안내는 stderr, 데이터만 stdout
 
 JOINTS = [f'arm_{a.arm}_joint{i}' for i in range(1, 8)]
 GRIP = f'gripper_{a.arm}_joint1'
@@ -107,10 +111,13 @@ spin(2.0)
 missing = [d for d in DXL if d not in state['I']] + [j for j in JOINTS if j not in state['q']]
 if missing:
     raise SystemExit(f'상태 없음: {missing} — bringup 켜졌는지, 토크 ON인지 확인')
-os.makedirs(a.out, exist_ok=True)
 stamp = time.strftime('%m%d_%H%M%S')
-if urdf.get('x'):
-    open(os.path.join(a.out, 'robot_description.urdf'), 'w').write(urdf['x'])
+if a.mode == 'urdf':
+    if not urdf.get('x'):
+        raise SystemExit('robot_description 못 받음')
+    sys.stdout.write(urdf['x'])
+    sys.stdout.flush()
+    raise SystemExit(0)
 
 if a.mode == 'noise':
     tag['phase'] = 'noise'
@@ -141,11 +148,20 @@ else:
     tag.update(phase='move', target='', dir='')
     go(home, a.move + 1.0)
 
-path = os.path.join(a.out, f'{stamp}_{a.mode}_{a.arm}' + (f'_j{a.joint}' if a.mode == 'sweep' else '') + '.csv')
-with open(path, 'w', newline='') as f:
-    w = csv.writer(f)
-    w.writerow(['t', 'phase', 'target', 'dir'] + [f'q{i}' for i in range(1, 8)] + [f'dq{i}' for i in range(1, 8)] + [f'I{i}' for i in range(1, 8)])
+header = ['t', 'phase', 'target', 'dir'] + [f'q{i}' for i in range(1, 8)] + [f'dq{i}' for i in range(1, 8)] + [f'I{i}' for i in range(1, 8)]
+if a.out == '-':
+    w = csv.writer(sys.stdout)
+    w.writerow(header)
     w.writerows(rows)
-print(f'저장: {path}  ({len(rows)}행)')
+    sys.stdout.flush()
+    print(f'완료: {len(rows)}행을 표준출력으로 보냄')
+else:
+    os.makedirs(a.out, exist_ok=True)
+    path = os.path.join(a.out, f'{stamp}_{a.mode}_{a.arm}' + (f'_j{a.joint}' if a.mode == 'sweep' else '') + '.csv')
+    with open(path, 'w', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+    print(f'저장: {path}  ({len(rows)}행)')
 n.destroy_node()
 rclpy.shutdown()
