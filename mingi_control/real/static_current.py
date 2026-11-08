@@ -13,7 +13,7 @@
 
 출력: --out - (기본) 이면 CSV를 표준출력으로 → 내 PC에서 ssh로 받아 로컬 파일로 저장 (로봇 PC에 아무것도 안 남김)
       --out <폴더> 이면 그 폴더에 저장.  안내 문구는 모두 stderr
-  열: t, phase, target, dir, 관절별 q·dq·I (I = /dynamic_joint_states 'Present Current', 단위 미확인 — 그대로 저장)
+  열: t, phase, target, dir, 관절별 q·dq·I (I = /dynamic_joint_states 'Present Current' — ROBOTIS 모델 파일이 raw×공칭 환산한 [N·m], 11/8 확인)
 
 사용 (내 PC에서, bringup 켜진 상태 — 스크립트를 ssh 표준입력으로 보내 컨테이너 안에서 실행):
   ssh robotis@<로봇> "docker exec -i ai_worker bash -ic 'python3 - noise --arm l --duration 30'" < static_current.py | sed -n '/^t,phase/,$p' > noise_l.csv
