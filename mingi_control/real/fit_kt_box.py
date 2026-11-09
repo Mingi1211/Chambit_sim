@@ -50,6 +50,13 @@ def hold_means(path):
         if r['phase'] == 'hold':
             g[float(r['target']), r['dir']].append(r)
     out = {}
+    if not g:   # 정지만 기록(static_current noise) — 접근 방향 없음 → 정지마찰이 상쇄되지 않음 (오차로 남음)
+        rs = [r for r in csv.DictReader(open(path)) if r['phase'] == 'noise']
+        if rs:
+            print(f'  [{path}] 정지 기록만 있음 — 위·아래 평균 없이 사용 (정지마찰 미상쇄)')
+            out['static'] = (np.mean([[float(r[f'q{i}']) for i in range(1, 8)] for r in rs], axis=0),
+                             np.mean([[float(r[f'I{i}']) for i in range(1, 8)] for r in rs], axis=0))
+        return out
     for tg in sorted({k[0] for k in g}):
         dirs = [g[tg, dr] for dr in ('from_above', 'from_below') if (tg, dr) in g]
         if len(dirs) < 2:
@@ -87,7 +94,7 @@ for tg in common:
     dtau_all.append(dtau)
     dI_all.append(dI)
     rows.append((tg, qb, qn, In, g))
-    print(f'{tg:+.2f}  ' + '  '.join(f'j{j+1}:{dtau[j]:+.2f}/{dI[j]:+.2f}' for j in range(7))
+    print(f'{tg if isinstance(tg, str) else f"{tg:+.2f}"}  ' + '  '.join(f'j{j+1}:{dtau[j]:+.2f}/{dI[j]:+.2f}' for j in range(7))
           + f'   |q박스−q없음| 최대 {np.abs(qb - qn).max() * 1000:.1f} mrad')
 dtau_all, dI_all = np.array(dtau_all), np.array(dI_all)
 
