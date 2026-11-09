@@ -9,7 +9,8 @@
 
 모드
   noise : 지금 자세 그대로 duration초 기록 (움직이지 않음) — 제어 주기·전류 잡음
-  sweep : --joint 관절을 --poses 각마다 위·아래 접근 → 각 hold초 기록
+  sweep : --joint 관절을 --poses 각마다 위·아래 접근 → 각 hold초 기록. 나머지 관절은 --base 자세(기본 home 0)
+  goto  : --base 자세로 이동만 (박스를 매달기 전, 손이 몸체에서 떨어진 자세로 옮길 때)
 
 출력: --out - (기본) 이면 CSV를 표준출력으로 → 내 PC에서 ssh로 받아 로컬 파일로 저장 (로봇 PC에 아무것도 안 남김)
       --out <폴더> 이면 그 폴더에 저장.  안내 문구는 모두 stderr
@@ -37,12 +38,13 @@ from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectoryPoint
 
 ap = argparse.ArgumentParser()
-ap.add_argument('mode', choices=['noise', 'sweep', 'urdf'])
+ap.add_argument('mode', choices=['noise', 'sweep', 'urdf', 'goto'])
 ap.add_argument('--arm', choices=['r', 'l'], default='l')
 ap.add_argument('--duration', type=float, default=30.0, help='noise 기록 시간 [s]')
 ap.add_argument('--joint', type=int, default=4, help='sweep 관절 번호 1~7')
 ap.add_argument('--poses', type=float, nargs='+', default=[0.0, -0.4, -0.8, -1.2], help='sweep 목표각 [rad]')
 ap.add_argument('--delta', type=float, default=0.1, help='위·아래 접근 거리 [rad]')
+ap.add_argument('--base', type=float, nargs=7, default=[0.0] * 7, help='기준 자세 q1~q7 [rad] (sweep 시작·끝, 나머지 관절 고정값)')
 ap.add_argument('--move', type=float, default=4.0, help='각 이동 시간 [s] (천천히)')
 ap.add_argument('--hold', type=float, default=4.0, help='정지 후 기록 시간 [s] (앞 1 s는 안정화로 표시)')
 ap.add_argument('--out', default='-', help="'-' = 표준출력 (기본), 아니면 저장 폴더")
@@ -119,6 +121,14 @@ if a.mode == 'urdf':
     sys.stdout.flush()
     raise SystemExit(0)
 
+if a.mode == 'goto':
+    go.cli = ActionClient(n, FollowJointTrajectory, f'/arm_{a.arm}_controller/follow_joint_trajectory')
+    if not go.cli.wait_for_server(timeout_sec=5.0):
+        raise SystemExit('arm 제어기 action 없음')
+    print(f'{a.arm}팔 기준 자세로 이동 {a.base} ({a.move + 1.0} s)', flush=True)
+    go(a.base, a.move + 1.0)
+    raise SystemExit(0)
+
 if a.mode == 'noise':
     tag['phase'] = 'noise'
     print(f'정지 기록 {a.duration} s — 팔을 건드리지 마세요', flush=True)
@@ -128,8 +138,8 @@ else:
     if not go.cli.wait_for_server(timeout_sec=5.0):
         raise SystemExit('arm 제어기 action 없음')
     k = a.joint - 1
-    home = [0.0] * 7
-    print(f'{a.arm}팔 관절{a.joint} sweep {a.poses} (δ {a.delta} rad, 이동 {a.move} s, 정지 {a.hold} s). 나머지 관절 0', flush=True)
+    home = list(a.base)
+    print(f'{a.arm}팔 관절{a.joint} sweep {a.poses} (δ {a.delta} rad, 이동 {a.move} s, 정지 {a.hold} s). 나머지 관절 = 기준 자세 {home}', flush=True)
     tag['phase'] = 'move'
     go(home, a.move + 1.0)
     for target in a.poses:
