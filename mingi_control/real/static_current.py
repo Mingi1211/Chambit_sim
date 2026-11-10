@@ -11,6 +11,9 @@
   noise : 지금 자세 그대로 duration초 기록 (움직이지 않음) — 제어 주기·전류 잡음
   sweep : --joint 관절을 --poses 각마다 위·아래 접근 → 각 hold초 기록. 나머지 관절은 --base 자세(기본 home 0)
   goto  : --base 자세로 이동만 (박스를 매달기 전, 손이 몸체에서 떨어진 자세로 옮길 때)
+  vel   : --joint 관절만 --base 기준 [--range lo hi] 구간을 --speeds 각 속도로 등속 왕복 (11/10 추가)
+          정지 측정은 위치 PID 적분값이 정지마찰 띠 안 어디서든 멈춰 '하중'이 아니라 '이력'을 보여줌 (11/9 j4 확인)
+          → 움직이는 동안(운동 마찰)은 전류가 하중 + 방향·속도 마찰로 정해짐. 등속 구간만 phase='cruise', dir='pos'/'neg'
 
 출력: --out - (기본) 이면 CSV를 표준출력으로 → 내 PC에서 ssh로 받아 로컬 파일로 저장 (로봇 PC에 아무것도 안 남김)
       --out <폴더> 이면 그 폴더에 저장.  안내 문구는 모두 stderr
@@ -38,13 +41,16 @@ from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectoryPoint
 
 ap = argparse.ArgumentParser()
-ap.add_argument('mode', choices=['noise', 'sweep', 'urdf', 'goto'])
+ap.add_argument('mode', choices=['noise', 'sweep', 'urdf', 'goto', 'vel'])
 ap.add_argument('--arm', choices=['r', 'l'], default='l')
 ap.add_argument('--duration', type=float, default=30.0, help='noise 기록 시간 [s]')
 ap.add_argument('--joint', type=int, default=4, help='sweep 관절 번호 1~7')
 ap.add_argument('--poses', type=float, nargs='+', default=[0.0, -0.4, -0.8, -1.2], help='sweep 목표각 [rad]')
 ap.add_argument('--delta', type=float, default=0.1, help='위·아래 접근 거리 [rad]')
 ap.add_argument('--base', type=float, nargs=7, default=[0.0] * 7, help='기준 자세 q1~q7 [rad] (sweep 시작·끝, 나머지 관절 고정값)')
+ap.add_argument('--range', type=float, nargs=2, default=[-0.2, 0.2], help='vel: 기준 자세 대비 왕복 구간 [rad]')
+ap.add_argument('--speeds', type=float, nargs='+', default=[0.05, 0.1], help='vel: 등속 [rad/s] (점성 분리용 2단계 이상)')
+ap.add_argument('--cycles', type=int, default=2, help='vel: 속도마다 왕복 횟수')
 ap.add_argument('--move', type=float, default=4.0, help='각 이동 시간 [s] (천천히)')
 ap.add_argument('--hold', type=float, default=4.0, help='정지 후 기록 시간 [s] (앞 1 s는 안정화로 표시)')
 ap.add_argument('--out', default='-', help="'-' = 표준출력 (기본), 아니면 저장 폴더")
@@ -129,7 +135,64 @@ if a.mode == 'goto':
     go(a.base, a.move + 1.0)
     raise SystemExit(0)
 
-if a.mode == 'noise':
+def go_const(q_from, q_to, v, k, base):
+    """관절 k만 q_from → q_to 를 속도 v로 등속 이동 (0.05 s 간격 위치·속도 경유점, JTC 3차 보간).
+    가속·감속 영향을 빼려고 이동 시간의 앞뒤 15%는 'ramp', 가운데 70%만 'cruise'로 기록"""
+    T = abs(q_to - q_from) / v
+    n_pt = max(2, int(T / 0.05))
+    goal = FollowJointTrajectory.Goal()
+    goal.trajectory.joint_names = JOINTS + [GRIP]
+    sgn = 1.0 if q_to > q_from else -1.0
+    for i in range(1, n_pt + 1):
+        pt = JointTrajectoryPoint()
+        q = list(base)
+        q[k] = q_from + (q_to - q_from) * i / n_pt
+        pt.positions = [float(x) for x in q] + [float(state['q'].get(GRIP, 0.0))]
+        vel = [0.0] * 8
+        vel[k] = sgn * v if i < n_pt else 0.0
+        pt.velocities = vel
+        t = T * i / n_pt
+        pt.time_from_start.sec, pt.time_from_start.nanosec = int(t), int((t % 1) * 1e9)
+        goal.trajectory.points.append(pt)
+    fut = go.cli.send_goal_async(goal)
+    rclpy.spin_until_future_complete(n, fut, timeout_sec=5.0)
+    h = fut.result()
+    if h is None or not h.accepted:
+        raise SystemExit('궤적 목표 거부')
+    res = h.get_result_async()
+    t0 = time.time()
+    tag.update(dir='pos' if sgn > 0 else 'neg', target=f'{v}')
+    while not res.done() and time.time() - t0 < T + 10.0:
+        el = time.time() - t0
+        tag['phase'] = 'cruise' if 0.15 * T <= el <= 0.85 * T else 'ramp'
+        rclpy.spin_once(n, timeout_sec=0.005)
+    tag['phase'] = 'settle'
+
+
+if a.mode == 'vel':
+    go.cli = ActionClient(n, FollowJointTrajectory, f'/arm_{a.arm}_controller/follow_joint_trajectory')
+    if not go.cli.wait_for_server(timeout_sec=5.0):
+        raise SystemExit('arm 제어기 action 없음')
+    k = a.joint - 1
+    base = list(a.base)
+    lo, hi = base[k] + a.range[0], base[k] + a.range[1]
+    print(f'{a.arm}팔 관절{a.joint} 등속 왕복 {lo:+.2f} ~ {hi:+.2f} rad, 속도 {a.speeds} rad/s × {a.cycles}회. 나머지 = 기준 자세 {base}', flush=True)
+    tag['phase'] = 'move'
+    go(base, a.move + 1.0)
+    q_lo = list(base)
+    q_lo[k] = lo
+    go(q_lo, a.move)
+    for v in a.speeds:
+        for _ in range(a.cycles):
+            go_const(lo, hi, v, k, base)
+            spin(0.5)
+            go_const(hi, lo, v, k, base)
+            spin(0.5)
+        print(f'  속도 {v} rad/s 완료', flush=True)
+    tag.update(phase='move', target='', dir='')
+    go(base, a.move + 1.0)
+
+elif a.mode == 'noise':
     tag['phase'] = 'noise'
     print(f'정지 기록 {a.duration} s — 팔을 건드리지 마세요', flush=True)
     spin(a.duration)
