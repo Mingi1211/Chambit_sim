@@ -28,7 +28,17 @@ robots:
 # position: 현대 기본(위치 서보만) / effort: 토크 경로 + 물리 1 ms + 외력 시험 플러그인 + 박스
 control_mode: effort
 gripper_effort: 0.88               # 그리퍼 쥐는 토크 [N·m] = gain_design.py ⑨ (N ≥ 15.8 N, 가상일 τ = N·|dgap/dq|/2)
-state_rate: 500                    # 시뮬 관절 상태·토크 루프 [Hz]. 게인은 실물 100 Hz 기준(gain_design ③⑦); 시뮬 플랜트는 armature가 없어 100 Hz면 이산 불안정 → 500 Hz에서 검증
+# 팔 관절 마찰 (effort 모드만): 비우면 마찰 0 (11/5 결과와 같은 조건)
+# 11/17 실측 (박스 없음, 등속 왕복): mingi_control/real/fit_friction.py — MR 그림 8.13 (c) 또는 (b), real_logs/1117_fric/friction_{l,r}.csv
+#   friction = b_static (쿨롱 = 정지, 그림 8.13(b)), damping = b_viscous
+joint_friction:
+  r:
+    friction: [6.387, 5.115, 7.869, 4.29, 3.157, 3.047, 1.091]   # [N·m]
+    damping:  [5.881, 4.119, 6.511, 2.691, 1.208, 4.15, 0.0]   # [N·m·s/rad]
+  l:
+    friction: [6.419, 5.667, 8.272, 3.215, 3.298, 3.175, 0.762]   # [N·m]
+    damping:  [8.973, 4.811, 1.268, 3.13, 2.531, 3.436, 0.095]   # [N·m·s/rad]
+state_rate: 500                   # 시뮬 관절 상태·토크 루프 [Hz]. 게인은 실물 100 Hz 기준(gain_design ③⑦); 시뮬 플랜트는 armature가 없어 100 Hz면 이산 불안정 → 500 Hz에서 검증
 box:
   robot: robot1
   center_base: [0.55, 0.0, 0.85]   # robot1 base_link 기준 = 월드 원점 위

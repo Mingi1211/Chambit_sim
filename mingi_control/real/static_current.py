@@ -188,7 +188,13 @@ if a.mode == 'vel':
             spin(0.5)
             go_const(hi, lo, v, k, base)
             spin(0.5)
-        print(f'  속도 {v} rad/s 완료', flush=True)
+        # 11/17 실시간 확인 (가공 없이 측정값만): 등속 구간 방향별 평균 Present Current와 실제 속도
+        cr = [r for r in rows if r[1] == 'cruise' and r[2] == f'{v}']
+        for dname in ('pos', 'neg'):
+            I_ = [float(r[18 + k]) for r in cr if r[3] == dname]
+            V_ = [float(r[11 + k]) for r in cr if r[3] == dname]
+            if I_:
+                print(f'  속도 {v} rad/s {dname}: 평균 Present Current {sum(I_) / len(I_):+.3f}, 실제 속도 {sum(V_) / len(V_):+.3f} rad/s', flush=True)
     tag.update(phase='move', target='', dir='')
     go(base, a.move + 1.0)
 

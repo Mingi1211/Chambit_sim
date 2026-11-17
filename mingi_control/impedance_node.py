@@ -128,6 +128,14 @@ class ImpedanceNode(Node):
         # 시뮬에서 넣으면 제어기가 손목을 실제보다 무겁게 봐 D가 커지고 발산(11/3 그리퍼 연 뒤 57 Hz 떨림)
         d('armature', [0.0] * 7)
         d('armature_real', [0.0, 0.0, 0.0, 0.0, 0.05, 0.05, 0.05])
+        # 11/16 마찰 보상 (기본 꺼짐 = 기존과 같음)
+        #  fric_ff: MR (11.32) 계획 궤적 피드포워드 τ = h̃(θ_d, θ̇_d)의 마찰 몫 = f_c·sgn(q̇_d) + b·q̇_d (MR 8.9.4 그림 8.13(c))
+        #  dgear:   MR (11.25)(11.26) ζ = (b + K_d)/(2√(K_p M)) — 관절 점성 b가 감쇠에 더해짐 → 작업공간 D_gear = J̄ᵀ diag(b) J̄ 만큼 D에서 뺌
+        #           (작업공간으로 옮기는 식은 MR에 그대로 없음: τ = −b q̇, q̇ = J̄ ẋ, F = J̄ᵀ τ 에서 유도 △)
+        d('fric_ff', False); d('dgear', False)
+        d('fric_c_r', [0.0] * 7); d('fric_c_l', [0.0] * 7)    # 쿨롱 [N·m] — 제어기가 "안다고 보는" 값 (플랜트 값과 다르게 줘서 민감도 시험 가능)
+        d('fric_b_r', [0.0] * 7); d('fric_b_l', [0.0] * 7)    # 점성 [N·m·s/rad]
+        d('fric_vel_eps', 1e-3)                               # [문서 밖] 계획 속도가 이보다 작으면 sgn = 0 (논문 식 (9) sgn(0)=0, 수치 떨림 방지) [rad/s]
         d('limit_margin', 0.15)                       # [rad] 영공간 자세 목표를 가동 한계에서 이만큼 안쪽에 (≈ 9°)
         d('D_safety', 0.5)
         d('omega_max', 25.0)                          # [문서 #8] 축별 ωn = √(K/Λ) 상한 [rad/s] — 실측 루프·통신 지연 반영(가벼운 손목 회전 발산 방지)
@@ -271,6 +279,10 @@ class ImpedanceNode(Node):
             # [문서 #8] ωn ≤ ω_max → K_ii ≤ Λ_ii ω_max² (회전 포함). 설정 K보다 작아지면 그 축은 상한값 사용
             K = np.diag(np.minimum(np.diag(K), np.diag(Lambda) * P('omega_max').item() ** 2))
             D_ii = 2 * self.get_parameter('zeta').value * np.sqrt(np.clip(np.diag(Lambda) * np.diag(K), 0, None))
+            if self.get_parameter('dgear').value:                # 11/16: D_ctrl = 2ζ√(ΛK) − D_gear ≥ 0
+                Jbt = Lambda @ J @ M_inv                          # J̄ᵀ (아래 영공간 식과 같음)
+                D_gear = Jbt @ np.diag(P(f'fric_b_{a.side}')) @ Jbt.T
+                D_ii = np.clip(D_ii - np.diag(D_gear), 0.0, None)   # 음의 감쇠는 넣지 않음
             # [문서 #8] 이산화 감쇠 상한 D < 2Λ/T — 실측 루프 주기 T(지연·저속 루프 반영)로 넘지 않게
             self.T_loop = 0.98 * getattr(self, 'T_loop', 0.002) + 0.02 * dt if 0 < dt < 0.05 else getattr(self, 'T_loop', 0.002)
             D = np.diag(np.minimum(D_ii, P('D_safety').item() * 2 * np.diag(Lambda) / self.T_loop))
@@ -291,11 +303,17 @@ class ImpedanceNode(Node):
             step = dt / max(self.get_parameter('weight_ramp').value, 1e-3)
             a.m_ff_now += float(np.clip(a.m_ff - a.m_ff_now, -step * max(a.m_ff, a.m_ff_now, 1e-9), step * max(a.m_ff, a.m_ff_now, 1e-9)))
             tau_ff = J[:3].T @ np.array([0.0, 0.0, a.m_ff_now * G / 2])
+            # 11/16 마찰 피드포워드: 계획 속도 q̇_d = J⁺ V_d (최소 노름) → f_c·sgn(q̇_d) + b·q̇_d. 정지 목표(V_d = 0)면 0
+            tau_fric = np.zeros(len(vi))
+            if self.get_parameter('fric_ff').value:
+                dq_d = np.linalg.pinv(J) @ Vd
+                sgn = np.where(np.abs(dq_d) > P('fric_vel_eps').item(), np.sign(dq_d), 0.0)
+                tau_fric = P(f'fric_c_{a.side}') * sgn + P(f'fric_b_{a.side}') * dq_d
             # [문서 #2] τ_cmd = τ_task + g + τ_null (+ 피드포워드), 포화
             if mode == 'gravity':
                 tau_cmd = np.clip(g_full[vi], -P('tau_max'), P('tau_max'))     # [T12] g(q)만 → 팔이 떠 있어야 함
             else:
-                tau_cmd = np.clip(tau_task + g_full[vi] + tau_null + tau_ff, -P('tau_max'), P('tau_max'))
+                tau_cmd = np.clip(tau_task + g_full[vi] + tau_null + tau_ff + tau_fric, -P('tau_max'), P('tau_max'))
             for k, idx in enumerate(a.cmd_idx):
                 out[idx] = float(tau_cmd[k])
             near = [k + 1 for k, i in enumerate(a.qi) if min(qa[k] - m.lowerPositionLimit[i], m.upperPositionLimit[i] - qa[k]) < 0.05]

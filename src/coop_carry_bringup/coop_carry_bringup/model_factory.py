@@ -34,6 +34,8 @@ def read_robots(path):
         robot["control_mode"] = config.get("control_mode", "position")
         robot["state_rate"] = int(config.get("state_rate", 100))
         robot["gripper_effort"] = float(config.get("gripper_effort", 5.0))
+        # [문서 밖] 김민기 11/16: 팔 관절 마찰 {r|l: {friction: [7], damping: [7]}} — 비우면 기존과 같음(마찰 0)
+        robot["joint_friction"] = config.get("joint_friction") or {}
         if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", robot["name"]):
             raise ValueError(f"Invalid robot namespace: {robot['name']}")
         for key in ("x", "y", "z", "yaw"):

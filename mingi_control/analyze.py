@@ -92,6 +92,8 @@ def t5(a):
     print(f'== T5 계단 응답 {a.axis}축 {step*1000:+.1f} mm [문서 #5·#6]')
     print(f'  K={K:.0f} N/m, Λ_{a.axis}{a.axis}={Lam:.2f} kg → ωn=√(K/Λ)={wn:.1f} rad/s, 예측 T_s≈5.8/ωn={5.8/wn:.3f} s')
     print(f'  측정: 오버슈트 {over:.1f} % (예측 ≈ 0), T_s(2%) {Ts:.3f} s')
+    e_end = (pd[after] - p[after])[seg_t >= seg_t[-1] - 1.0]          # 11/17: 마지막 1 s 평균 = e_ss (마찰 실험 비교용)
+    print(f'  e_ss(마지막 1 s 평균 목표−손) {e_end.mean()*1000:+.2f} mm, 시작 전 오차 {(pd[k0-1]-p[k0-1])*1000:+.2f} mm (0 근처여야 유효)')
     plt.plot(seg_t, (seg_p - p0) * 1000, label='측정'); plt.plot(seg_t, (pd[after] - p0) * 1000, '--', label='목표')
     plt.axvline(5.8 / wn, color='gray', ls=':', label='예측 T_s')
     plt.xlabel('t [s]'); plt.ylabel(f'{a.axis} 변위 [mm]'); plt.legend(); plt.title('T5 계단 응답')

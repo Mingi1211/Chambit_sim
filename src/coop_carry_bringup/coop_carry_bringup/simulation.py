@@ -151,6 +151,18 @@ def _add_effort_path(physics, gazebo, actuator, robot):
         # 쥐는 토크는 구동 관절(joint1)에만. mimic 관절(2·3·4)은 실물에선 강체 링크라 한계를 낮추면 손잡이에 밀려 접힘(11/5 확인)
         if joint.get("name", "").startswith("gripper_") and joint.get("name", "").endswith("joint1") and joint.find("limit") is not None:
             joint.find("limit").set("effort", str(robot.get("gripper_effort", 5.0)))
+    # 관절 마찰 (11/16): MR 8.9.4 그림 8.13(c) 쿨롱 + 점성. robots.yaml joint_friction → URDF <dynamics friction damping>
+    # → sdformat이 SDF <axis><dynamics>로 변환 → gz-physics dartsim이 DART 관절 마찰·감쇠로 적용 (물리 모델에만, 제어 모델 아님)
+    for side, values in robot.get("joint_friction", {}).items():
+        for i in range(7):
+            joint = physics.find(f"joint[@name='arm_{side}_joint{i + 1}']")
+            if joint is None:
+                continue
+            dynamics = joint.find("dynamics")
+            if dynamics is None:
+                dynamics = ET.SubElement(joint, "dynamics")
+            dynamics.set("friction", str(float(values["friction"][i])))
+            dynamics.set("damping", str(float(values["damping"][i])))
     # 토크 명령 경로: /sim/<robot>/effort (Actuators.normalized = 관절 토크, NaN = 위치 서보 유지)
     for key, value in {
         "effort_topic": f"/sim/{name}/effort",
