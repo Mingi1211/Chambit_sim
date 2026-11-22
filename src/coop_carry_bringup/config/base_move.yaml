@@ -13,7 +13,8 @@ carry_base_move:
     stop_wheel: 0.1
     settle_time: 0.5
     min_travel: 0.01
-    feedback_timeout: 0.5
+    feedback_timeout: 0.5       # 시뮬레이션 시간 기준 메시지 나이 [s]
+    feedback_wall_timeout: 2.0  # 실제 시간 기준 마지막 유효 메시지 수신 간격 [s]
     clock_timeout: 2.0
     stop_timeout: 10.0
-    wall_timeout: 180.0
+    wall_timeout: 600.0

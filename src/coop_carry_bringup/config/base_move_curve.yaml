@@ -1,0 +1,5 @@
+carry_base_move:
+  ros__parameters:
+    # 공통 거리·시간·방향·안전 설정은 base_move.yaml을 그대로 불러온다.
+    # Robot 1만 적용 [m]. +Y 전진 시 양수는 월드 -X, 음수는 +X 방향 이탈.
+    side_offset: 0.20

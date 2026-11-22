@@ -46,6 +46,7 @@ class BaseMoveNode(Node):
                 for item in fields(defaults)
             }
         )
+        self.configure_trajectory()
         self.sequence = BaseSequence(self.settings)
         self.interface = (
             MockBaseInterface if self.mode == "mock" else SwerveBaseInterface
@@ -85,6 +86,19 @@ class BaseMoveNode(Node):
         self.report()
         self.get_logger().info(
             f"[{self.mode.upper()}] Ready to monitor lift; movement requires /carry/start_base_move"
+        )
+
+    def configure_trajectory(self):
+        """주행별 추가 파라미터를 검증한다. 직선 주행은 MoveSettings만 사용한다."""
+
+    def command_motion(self):
+        """기존 직선 속도를 두 로봇에 동일하게 전달한다."""
+        speed = self.sequence.speed(self.sim_time())
+        norm = math.hypot(self.settings.direction_x, self.settings.direction_y)
+        self.interface.command(
+            speed * self.settings.direction_x / norm,
+            speed * self.settings.direction_y / norm,
+            self.initial_yaws,
         )
 
     def sim_time(self):
@@ -255,6 +269,9 @@ class BaseMoveNode(Node):
             self.interface.update(min(now - self.last_tick, 0.1))
             self.last_tick = now
             ready, reason = self.ready()
+            if self.aligning is not None and not ready:
+                self.aligning = None
+                self.sequence.fail(reason)
             self.sequence.tick(
                 self.sim_time(),
                 now,
@@ -265,13 +282,7 @@ class BaseMoveNode(Node):
             if self.aligning is not None and self.sequence.state == "ARMED":
                 self.align_tick()
             elif self.sequence.state == "MOVING":
-                speed = self.sequence.speed(self.sim_time())
-                norm = math.hypot(self.settings.direction_x, self.settings.direction_y)
-                self.interface.command(
-                    speed * self.settings.direction_x / norm,
-                    speed * self.settings.direction_y / norm,
-                    self.initial_yaws,
-                )
+                self.command_motion()
             else:
                 self.interface.stop()
             if self.sequence.state == "FAULT" and not ready:
@@ -282,7 +293,8 @@ class BaseMoveNode(Node):
         self.report()
 
 
-def main():
+def run_base_node(node_type):
+    """직선·곡선이 같은 실행 잠금, ROS graph 검사, 종료 시 정지를 사용한다."""
     require_simulation()
     # 같은 PC의 별도 터미널 중복 실행은 노드 생성 전 차단한다. 다른 호스트는 ROS graph로 감시한다.
     lock_path = Path(f"/tmp/coop_carry_base_{os.getuid()}_71.lock")
@@ -302,7 +314,7 @@ def main():
         signal.signal(signal.SIGTERM, request_stop)
         node = None
         try:
-            node = BaseMoveNode()
+            node = node_type()
             while rclpy.ok() and not stopping:
                 rclpy.spin_once(node, timeout_sec=0.05)
         finally:
@@ -311,3 +323,7 @@ def main():
                 node.done_publisher.publish(Bool(data=False))
                 node.destroy_node()
             rclpy.try_shutdown()
+
+
+def main():
+    run_base_node(BaseMoveNode)

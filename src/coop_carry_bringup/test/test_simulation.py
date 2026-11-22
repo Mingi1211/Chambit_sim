@@ -86,6 +86,8 @@ def test_two_external_models_have_no_internal_managers(tmp_path, base_mode):
         for r in ("robot1", "robot2")
         for topic in ("joint_states", "actuators")
     }
+    if settings.get("control_mode") == "effort":
+        expected |= {f"/sim/{robot}/effort" for robot in ("robot1", "robot2")}
     if base_mode == "swerve":
         expected |= {
             f"/sim/{robot}/{topic}"

@@ -62,7 +62,7 @@ def test_stationary_robot_is_not_reported_as_successful_travel():
         (2, 2, False, "Feedback"),
         (0, 2, True, "backwards"),
         (1, 4, True, "clock stopped"),
-        (2, 200, True, "wall-clock"),
+        (2, 700, True, "wall-clock"),
     ],
 )
 def test_faults_stop_commands(sim_time, wall_time, feedback, reason):
@@ -123,6 +123,7 @@ def test_quintic_integral_and_boundaries():
         {"direction_y": 0.0},
         {"distance": 20.0},
         {"feedback_timeout": -1.0},
+        {"feedback_wall_timeout": 0.0},
     ],
 )
 def test_invalid_settings(settings):
@@ -143,3 +144,17 @@ def test_mock_never_creates_physical_publishers():
     interface.stop()
     interface.update(1.0)
     assert all(state.linear_speed == 0 for state in interface.states.values())
+
+
+def test_slow_simulation_keeps_moving_until_simulated_duration():
+    sequence = armed_sequence()
+    sequence.start(1.0, 1.0)
+    # 실측에 가까운 RTF=0.032: 실제 200초 후에도 시뮬레이션은 6.4초 진행.
+    for index in range(1, 1001):
+        wall = 1.0 + index * 0.2
+        sim = 1.0 + index * 0.2 * 0.032
+        sequence.tick(sim, wall, True, False, True)
+    assert sequence.state == "MOVING"
+    assert sequence.speed(sim) > 0
+    sequence.tick(11.0, 313.5, True, False, True)
+    assert sequence.state == "STOPPING"

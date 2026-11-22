@@ -22,6 +22,7 @@ setup(
             "robot_command = coop_carry_bringup.command_client:main",
             "test_independent_arms = coop_carry_bringup.verify_motion:main",
             "base_move_node = coop_carry_bringup.base_move_node:main",
+            "base_move_curve_node = coop_carry_bringup.base_move_curve_node:main",
             "base_state_tf = coop_carry_bringup.base_state_tf:main",
         ]
     },

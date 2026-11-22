@@ -17,10 +17,12 @@ class MoveSettings:
     direction_x: float = 0.0
     direction_y: float = 1.0
     max_speed: float = 0.4
+    # 데이터 나이는 시뮬레이션 시간, 수신 중단은 실제 시간으로 각각 검사한다.
     feedback_timeout: float = 0.5
+    feedback_wall_timeout: float = 2.0
     settle_time: float = 0.5
     stop_timeout: float = 10.0
-    wall_timeout: float = 180.0
+    wall_timeout: float = 600.0
     clock_timeout: float = 2.0
     stop_linear: float = 0.01
     stop_angular: float = 0.02
@@ -34,6 +36,7 @@ class MoveSettings:
             self.duration,
             self.max_speed,
             self.feedback_timeout,
+            self.feedback_wall_timeout,
             self.settle_time,
             self.stop_timeout,
             self.wall_timeout,

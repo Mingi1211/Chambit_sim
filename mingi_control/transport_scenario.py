@@ -13,6 +13,7 @@
 사용: python3 transport_scenario.py [--lift 0.05] [--retract_mode qp|impedance]
 """
 import argparse
+import json
 import math
 import os
 import re
@@ -36,7 +37,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--leader', default='robot1')
 ap.add_argument('--follower', default='robot2')
 ap.add_argument('--dy', type=float, default=2.0, help='판정용: robots.yaml box.place.dy (받침대 위치) [m]')
-ap.add_argument('--base_timeout', type=float, default=300.0, help='베이스 이동 완료 대기 [s, wall]')
+ap.add_argument('--base_timeout', type=float, default=600.0, help='베이스 이동 완료 대기 [s, wall]')
 ap.add_argument('--lift', type=float, default=0.05)
 ap.add_argument('--box_mass', type=float, default=2.0)
 GAINS = yaml.safe_load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gains.yaml')))   # gain_design.py 결과
@@ -49,6 +50,8 @@ ap.add_argument('--retract_time', type=float, default=3.0, help='팔 빼기 이�
 ap.add_argument('--retract_mode', choices=['qp', 'impedance'], default='qp',
                 help='qp: 위치 제어로 복귀 후 현대 QP(MoveL)로 빼기 / impedance: 토크 모드 유지한 채 목표 이동으로 빼고 나서 위치 복귀')
 a = ap.parse_args()
+if not math.isfinite(a.base_timeout) or a.base_timeout <= 0:
+    ap.error('--base_timeout must be a finite positive number')
 robots = [a.leader, a.follower]
 
 rclpy.init()
@@ -63,6 +66,7 @@ n.create_subscription(Bool, '/carry/base_move_done', lambda m: base_done.update(
 n.create_subscription(String, '/carry/base_move_status', lambda m: base_done.update(status=m.data), STATE_QOS)
 start_cli = n.create_client(Trigger, '/carry/start_base_move')
 reset_cli = n.create_client(Trigger, '/carry/reset_base_move')
+stop_cli = n.create_client(Trigger, '/carry/stop_base_move')
 mode_pub = {r: n.create_publisher(String, f'/{r}/impedance/mode', 10) for r in robots}
 goal_pub = {(r, s): n.create_publisher(MoveL, f'/{r}/{s}_goal_move', 10) for r in robots for s in 'rl'}   # 현대 QP 입력
 tf_buffer = Buffer()
@@ -109,12 +113,71 @@ def step(name, wait):
 
 def call(cli, label):
     if not cli.wait_for_service(timeout_sec=5.0):
-        raise SystemExit(f'{label} 서비스 없음 — 현대 베이스 노드 실행: ros2 launch coop_carry_bringup base_move.launch.py')
+        raise RuntimeError(f'{label} 서비스 없음 — 현대 베이스 노드 실행: ros2 launch coop_carry_bringup base_move.launch.py')
     fut = cli.call_async(Trigger.Request())
     rclpy.spin_until_future_complete(n, fut, timeout_sec=5.0)
+    if not fut.done():
+        fut.cancel()
+        raise TimeoutError(f'{label} 서비스 응답 시간 초과')
     res = fut.result()
+    if res is None:
+        raise RuntimeError(f'{label} 서비스 응답 없음')
     print(f'   {label}: {res.success} {res.message}', flush=True)
     return res.success
+
+
+def run_base_move():
+    """새 lift 허가로 시작하고, 완료 신호를 받은 경우에만 다음 단계로 반환한다."""
+    lift_pub.publish(Bool(data=False))
+    spin(0.5)
+    if not call(reset_cli, 'reset_base_move'):
+        raise RuntimeError('베이스 초기화 거부')
+    base_done.update(v=False, status='')
+    lift_pub.publish(Bool(data=True))
+    spin(1.0)
+    events.append(('4 베이스 이동 시작', time.time()))
+    print(f'[{time.strftime("%H:%M:%S")}] 4 베이스 이동 (현대 스워브, base_move.yaml)', flush=True)
+    if not call(start_cli, 'start_base_move'):
+        raise RuntimeError('베이스 시작 거부 — 두 베이스 정지·피드백 ready 필요')
+    started = time.monotonic()
+    while True:
+        if base_done['status']:
+            status = json.loads(base_done['status'])
+            if status.get('state') == 'FAULT':
+                raise RuntimeError(f"베이스 FAULT: {status.get('reason', base_done['status'])}")
+        if base_done['v']:
+            return
+        if time.monotonic() - started > a.base_timeout:
+            raise TimeoutError(f'베이스 이동 완료 대기 {a.base_timeout:g}초 초과')
+        spin(0.1)
+
+
+def abort_transport(reason):
+    """베이스 정지를 요청하고 파지·무게 보상·임피던스 모드는 유지한 채 종료한다."""
+    message = f'운반 중단: {reason}'
+    events.append((message, time.time()))
+    print(message, flush=True)
+    try:
+        lift_pub.publish(Bool(data=False))
+    except Exception as exc:
+        print(f'   lift 허가 취소를 발행하지 못했습니다: {exc}', flush=True)
+    try:
+        if not call(stop_cli, 'stop_base_move'):
+            print('   베이스 정지 요청이 거부됐습니다. 베이스 노드 상태를 확인하세요.', flush=True)
+    except Exception as exc:
+        print(f'   베이스 정지 응답을 확인하지 못했습니다: {exc}', flush=True)
+    finally:
+        stop.set()
+        th.join(timeout=1.0)
+        try:
+            with open(ev_log, 'w') as log:
+                log.write('name,t\n' + ''.join(f'{k},{t:.3f}\n' for k, t in events))
+        except OSError as exc:
+            print(f'   기존 이벤트 기록을 저장하지 못했습니다: {exc}', flush=True)
+        n.destroy_node()
+        rclpy.try_shutdown()
+    print('   내려놓기·그리퍼 해제는 실행하지 않았습니다. 박스 지지를 위해 임피던스 노드는 유지하세요.', flush=True)
+    raise SystemExit(1)
 
 
 th = threading.Thread(target=box_monitor, daemon=True)
@@ -128,23 +191,11 @@ step(f'2 무게 피드포워드 로봇당 {a.box_mass/2} kg (램프 {GAINS["weig
 for r in robots:
     put(r, 'offset', (0.0, 0.0, a.lift))
 step(f'3 들기 +{a.lift*100:.0f} cm', a.move + 2.0)
-# 4 베이스 이동 — 현대 base_move_node에 맡김 (한 번 쓴 lift 허가는 재사용 안 됨: False → reset → True)
-lift_pub.publish(Bool(data=False))
-spin(0.5)
-call(reset_cli, 'reset_base_move')
-lift_pub.publish(Bool(data=True))
-spin(1.0)
-events.append(('4 베이스 이동 시작', time.time()))
-print(f'[{time.strftime("%H:%M:%S")}] 4 베이스 이동 (현대 스워브, base_move.yaml)', flush=True)
-if not call(start_cli, 'start_base_move'):
-    raise SystemExit('베이스 시작 거부 — 위 메시지 확인 (두 베이스 정지·피드백 ready 필요). 박스는 들린 채 유지 중')
-t0 = time.time()
-base_done['v'] = False
-while not base_done['v']:
-    spin(0.5)
-    if '"FAULT"' in base_done['status'] or time.time() - t0 > a.base_timeout:
-        print('   베이스 이동 실패/시간 초과: ' + base_done['status'][:300], flush=True)
-        break
+# 4 베이스 이동 — 실패하면 아래 내려놓기 단계에 도달하지 않는다.
+try:
+    run_base_move()
+except (Exception, KeyboardInterrupt) as exc:
+    abort_transport(str(exc) or '사용자 중단')
 lift_pub.publish(Bool(data=False))
 step('   베이스 도착', 3.0)
 # 파지 순간 박스가 받침대에서 들려 있던 높이(접촉 감지 뒤 쥐며 들림, 11/5 실측 1.3 cm)만큼 더 내려야 받침대에 닿음

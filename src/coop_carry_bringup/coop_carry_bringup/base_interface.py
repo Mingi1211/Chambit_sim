@@ -35,7 +35,9 @@ class BaseFeedback:
     y: float = 0.0
     yaw: float = 0.0
     linear_speed: float = 0.0
-    vx: float = 0.0   # [김민기] 월드 기준 차체 속도 (정렬 판정용, 차체 좌표 twist를 yaw로 회전)
+    vx: float = (
+        0.0  # [김민기] 월드 기준 차체 속도 (정렬 판정용, 차체 좌표 twist를 yaw로 회전)
+    )
     vy: float = 0.0
     angular_speed: float = 0.0
     wheel_speed: float = 0.0
@@ -69,6 +71,10 @@ class MockBaseInterface:
     def command(self, vx, vy, initial_yaws):
         for robot in ROBOTS:
             self.velocities[robot] = (vx, vy)
+
+    def command_each(self, velocities, initial_yaws):
+        """로봇별 월드 속도를 가상 피드백에 적용한다. 실제 토픽은 만들지 않는다."""
+        self.velocities = {robot: tuple(velocities[robot]) for robot in ROBOTS}
 
     def stop(self):
         self.command(0.0, 0.0, {})
@@ -155,8 +161,11 @@ class SwerveBaseInterface:
             yaw_of(pose.orientation),
         )
         state.linear_speed = math.sqrt(sum(value**2 for value in values[7:10]))
-        c, si = math.cos(state.yaw), math.sin(state.yaw)   # twist는 차체 좌표 → 월드
-        state.vx, state.vy = c * values[7] - si * values[8], si * values[7] + c * values[8]
+        c, si = math.cos(state.yaw), math.sin(state.yaw)  # twist는 차체 좌표 → 월드
+        state.vx, state.vy = (
+            c * values[7] - si * values[8],
+            si * values[7] + c * values[8],
+        )
         state.angular_speed = math.sqrt(sum(value**2 for value in values[10:13]))
         state.stamp, state.received = stamp, time.monotonic()
 
@@ -213,12 +222,25 @@ class SwerveBaseInterface:
 
     def ready(self):
         now = time.monotonic()
+        sim_now = self.node.get_clock().now().nanoseconds / 1e9
         for robot, state in self.states.items():
             if (
                 max(now - state.received, now - state.joint_received)
-                > self.settings.feedback_timeout
+                > self.settings.feedback_wall_timeout
             ):
-                return False, f"{robot}: missing/stale actual chassis or wheel feedback"
+                return (
+                    False,
+                    f"{robot}: chassis/wheel feedback reception timeout (wall clock)",
+                )
+            if any(
+                stamp < 0
+                or not -0.1 <= sim_now - stamp <= self.settings.feedback_timeout
+                for stamp in (state.stamp, state.joint_stamp)
+            ):
+                return (
+                    False,
+                    f"{robot}: stale chassis/wheel source timestamp (simulation clock)",
+                )
             if any(
                 now - self.query_times.get((robot, kind), 0.0) > 1.5
                 for kind in ("controllers", "hardware")
@@ -254,6 +276,16 @@ class SwerveBaseInterface:
             message.linear.x, message.linear.y = world_to_body(
                 vx, vy, initial_yaws[robot]
             )
+            publisher.publish(message)
+
+    def command_each(self, velocities, initial_yaws):
+        """로봇별 월드 속도를 각각의 초기 yaw로 차체 좌표계에 변환한다."""
+        for robot, publisher in self.publishers.items():
+            message = Twist()
+            message.linear.x, message.linear.y = world_to_body(
+                *velocities[robot], initial_yaws[robot]
+            )
+            message.angular.z = 0.0
             publisher.publish(message)
 
     def stop(self):
