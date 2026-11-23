@@ -34,3 +34,18 @@ python3 ../viz/compare_gif.py --dir ../../real_logs/1123_curve_trials --tags b1_
 - (40, 10)을 정상 곡선(Δx 0.2 m)에서 미확인 — 베이스 출발 지연이 무작위(5회 중 정상 1회)
 - 베이스 출발 지연 원인 미확인 (후보: `coop_carry_hardware/src/gazebo_swerve_actuator.cpp` 지령 timeout) → 현대 확인
 - 손 F/T 원신호에 접촉 충격 스파이크 → 대표값은 중앙값
+
+## 11/24 최종 재측정 (전달자료 P0 ~ P2) — 결과 `real_logs/1124_final/report/보고_최종재측정_1124.md`
+| 무엇 | 파일 |
+|---|---|
+| 실행 (시뮬 띄우기 → 노드 → 파지 → 운반 → 정리, 파지 실패·베이스 시작 거부 시 재시도) | `run/run1.bash`, `run/queue.bash`, 실행 목록 `run/q_final.txt` |
+| 기록 노드 (베이스 자세, 바퀴 관절, 손 렌치 원신호, 상태, 녹화) | `run/curve_rec.py` |
+| 베이스 수정 파라미터 (현대 베이스 노드, 기본 꺼짐) | `run/base_fix_s00575.yaml`, `run/base_fix_s020.yaml`, 설명 `run/BASE_FIX_현대공유.md` |
+| 요약표 | `final_table.py` |
+| 정지 중 손 힘 떨림 | `hand_spectrum.py` |
+| 마찰 보상 `fric_src:=both` | `../impedance_node.py` (계획 속도 MR (11.32) + 측정 속도 MR (11.65)) |
+```bash
+LOG=/tmp/curve_queue bash run/queue.bash run/q_final.txt          # 전체 (런당 10 ~ 15분)
+python3 final_table.py                                             # 조건별 표
+python3 curve_analysis.py --dir ../../real_logs/1124_final --tags A1_K40_off H1_K40_both --base
+```

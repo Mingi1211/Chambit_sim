@@ -41,7 +41,7 @@ Kz, Krot, wn_null = G['K_pos'][2], G['K_rot'], G['null_omega']
 wn_max = G['omega_max']
 
 
-def rho_c(Kxy, c):
+def rho_c(Kxy, c, all_eigs=False):
     """gain_design.rho와 같은 식, 플랜트 관절 점성 c를 관절별 벡터로"""
     from scipy.linalg import expm
     out = 0.0
@@ -60,7 +60,11 @@ def rho_c(Kxy, c):
         B = np.vstack([np.zeros((7, 7)), Mi])
         E = expm(np.block([[A, B], [np.zeros((7, 21))]]) * T)
         Phi = E[:14, :14] - E[:14, 14:] @ np.hstack([Kq, Dq])
-        out = max(out, float(np.abs(np.linalg.eigvals(Phi)).max()))
+        z = np.linalg.eigvals(Phi)
+        if all_eigs:
+            out = z if isinstance(out, float) else np.concatenate([out, z])
+        else:
+            out = max(out, float(np.abs(z).max()))
     return out
 
 
@@ -83,6 +87,14 @@ print(f'   플랜트 점성 0.1 (URDF, 11/5 설계)        : K_max = {km_old:.0f
 print(f'   플랜트 점성 = 11/17 실측 b_viscous        : K_max = {km_new:.0f} N/m')
 KM = min(km_old, km_new)
 print(f'   → 사용 K_max = {KM:.0f} N/m (둘 중 작은 값). 실측 점성을 넣어도 경계는 거의 같음: 경계는 손목의 D T/Λ = 2 (감쇠 상한)에서 정해짐')
+z = rho_c(500.0, b_real, all_eigs=True)
+zr = z[np.abs(z.imag) < 1e-9]
+zs = zr[np.argmax(np.abs(zr))]
+print(f'   판정을 ρ ≤ 0.99 → ρ < 1 로 바꾼 이유: 실측 점성을 넣으면 가장 느린 극점 z = {zs.real:.4f} (양의 실수, 안정)')
+print(f'     → 시정수 τ = −T/ln|z| = {-T / np.log(abs(zs)):.1f} s (점성이 큰 관절이 천천히 제자리로 가는 모드). 0.99 기준은 이 느린 안정 모드를 불안정으로 오판')
+zn = zr[zr.real < 0]
+if len(zn):
+    print(f'     경계에서 커지는 것은 음의 실수 극점 (K 500: {zn.real.min():.3f}) → K ≳ {KM:.0f}에서 −1을 넘음 = 이산 감쇠 상한 D T/Λ = 2')
 
 print('\n② 손끝 마찰력 F_fric = |J̄ᵀ| b_static (파지 자세, 관절 부호 최악)  [N]   (base_link: x = 상대 로봇 방향, y = 주행 방향)')
 F = {}
@@ -105,9 +117,18 @@ if a.delta:
     dx, dy = a.delta
     print(f'   베이스 간 최대 오차 Δx = {dx * 1000:.0f} mm, Δy = {dy * 1000:.0f} mm (곡선 주행 실측)')
     Fr = a.F_res if a.F_res else [0.0, 0.0]
-    for ax, D, f in (('x', dx, Fr[0]), ('y', dy, Fr[1])):
-        hi = (S['F_int_max'] - f) / D
-        print(f'   {ax}: F_res = {f:.1f} N (보상 있음) → K_F,{ax} ≤ (15 − F_res)/Δ = {hi:.0f} N/m')
+    rec = []
+    for ax, D, f, dl in (('x', dx, Fr[0], Fw[0] / KM), ('y', dy, Fr[1], Fw[1] / KM)):
+        hi = (S['F_int_max'] - f) / D if D > 0 else float('inf')
+        k = math.floor(min(hi, KM) / 10) * 10                              # 10 단위 내림 (GAIN_RATIONALE ⑥과 같은 규칙)
+        rec.append(k)
+        why = '내력 조건' if hi < KM else f'Δ{ax}가 작아 내력 조건이 상한을 넘음 → 넣을 수 있는 상한 K_max'
+        print(f'   {ax}: F_res = {f:.1f} N (보상 있음) → K_F,{ax} ≤ (15 − F_res)/Δ{ax} = {hi:.0f} N/m, K_max {KM:.0f} → K_F,{ax} = {k} N/m ({why})')
+    KL = G['leader_K_pos'][0]
+    eL = [D * K / (KL + K) * 1000 for D, K in zip((dx, dy), rec)]
+    print(f'   확인 — 리더 오차 Δ K_F/(K_L + K_F) (GAIN_RATIONALE ⑥): x {eL[0]:.1f} mm, y {eL[1]:.1f} mm '
+          f'≤ ③ 허용 오차 x {Fw[0] / KM * 1000:.0f}, y {Fw[1] / KM * 1000:.0f} mm')
+    print(f'   → 재산정 K_F = ({rec[0]}, {rec[1]}) N/m')
     KL = G['leader_K_pos'][0]
     for KF in (10, 20, 40, 75, 150, 500):
         eL = [D * KF / (KL + KF) * 1000 for D in (dx, dy)]

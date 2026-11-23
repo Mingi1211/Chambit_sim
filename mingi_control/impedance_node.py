@@ -76,7 +76,7 @@ class Arm:
         Rf = pin.Quaternion(o.w, o.x, o.y, o.z).normalized().toRotationMatrix() if (o.x, o.y, o.z, o.w) != (0, 0, 0, 0) \
             else self.xd[1].copy()       # 자세를 안 주면 현재 목표 자세 유지
         T = float(self.node.get_parameter('move_time').value)
-        self.traj = (time.monotonic(), T, self.xd[0].copy(), self.xd[1].copy(), pf, Rf)
+        self.traj = (self.node.t_now, T, self.xd[0].copy(), self.xd[1].copy(), pf, Rf)
 
     def on_offset(self, msg):
         """현재 목표에서 (dx, dy, dz)만큼 이동 — 자세 유지, move_time 동안 5차 궤적 (T5 계단: move_time 작게)"""
@@ -84,7 +84,7 @@ class Arm:
             return
         pf = self.xd[0] + np.array([msg.x, msg.y, msg.z])
         T = float(self.node.get_parameter('move_time').value)
-        self.traj = (time.monotonic(), T, self.xd[0].copy(), self.xd[1].copy(), pf, self.xd[1].copy())
+        self.traj = (self.node.t_now, T, self.xd[0].copy(), self.xd[1].copy(), pf, self.xd[1].copy())
 
     def on_stiffness(self, msg):
         self.K[0, 0], self.K[1, 1], self.K[2, 2] = msg.x, msg.y, msg.z
@@ -94,7 +94,7 @@ class Arm:
         if self.traj is None:
             return self.xd[0], self.xd[1], np.zeros(6)
         t0, T, p0, R0, pf, Rf = self.traj
-        s, ds = quintic((time.monotonic() - t0) / T)
+        s, ds = quintic((self.node.t_now - t0) / T)      # [11/24] 궤적 시간 = 제어 루프 시각(시뮬은 시뮬 시간, 실물은 벽시계)
         w = pin.log3(R0.T @ Rf)
         pd = p0 + s * (pf - p0)
         Rd = R0 @ pin.exp3(w * s)
@@ -134,6 +134,7 @@ class ImpedanceNode(Node):
         #           (작업공간으로 옮기는 식은 MR에 그대로 없음: τ = −b q̇, q̇ = J̄ ẋ, F = J̄ᵀ τ 에서 유도 △)
         #  fric_src: 'desired' = 위 (11.32) θ̇_d 기준 / 'actual' = MR (11.65) 팔 동역학 보상 η̃(θ, ẋ)처럼 측정 속도 q̇로 h̃의 마찰 몫 계산
         #            (11/23: 곡선 주행 중 손 목표가 고정(V_d = 0)이면 'desired'는 0 → 팔로워가 베이스 오차를 따라 움직일 때의 마찰은 'actual'로만 보상)
+        #  fric_src 'both' (11/24): 관절별로 계획 속도가 있으면 'desired', 없으면 'actual'
         d('fric_ff', False); d('dgear', False); d('fric_src', 'desired')
         d('fric_c_r', [0.0] * 7); d('fric_c_l', [0.0] * 7)    # 쿨롱 [N·m] — 제어기가 "안다고 보는" 값 (플랜트 값과 다르게 줘서 민감도 시험 가능)
         d('fric_b_r', [0.0] * 7); d('fric_b_l', [0.0] * 7)    # 점성 [N·m·s/rad]
@@ -161,6 +162,7 @@ class ImpedanceNode(Node):
         self.model = None
         self.enabled = True
         self.last_state = 0.0
+        self.t_now = 0.0                                    # 마지막 제어 루프 시각 [s]
         qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(String, f'/{self.robot}/robot_description', self.on_urdf, qos)
         state_topic = f'/sim/{self.robot}/joint_states' if self.get_parameter('output').value == 'sim' \
@@ -229,6 +231,7 @@ class ImpedanceNode(Node):
         # 루프 주기 T = 상태 메시지 시각 차 (시뮬은 시뮬 시간: 플랜트가 토크를 유지하는 실제 간격 → 문서 4쪽 D < 2Λ/T의 T)
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         now = stamp if stamp > 0 else time.monotonic()
+        self.t_now = now                                    # Arm 목표 궤적 시각 (on_goal/on_offset/desired)
         dt = now - self.last_state if self.last_state else 0.0
         self.last_state = now
         m, d = self.model, self.data
@@ -308,7 +311,17 @@ class ImpedanceNode(Node):
             # 11/16 마찰 피드포워드: 계획 속도 q̇_d = J⁺ V_d (최소 노름) → f_c·sgn(q̇_d) + b·q̇_d. 정지 목표(V_d = 0)면 0
             tau_fric = np.zeros(len(vi))
             if self.get_parameter('fric_ff').value:
-                dq_d = dqa if self.get_parameter('fric_src').value == 'actual' else np.linalg.pinv(J) @ Vd
+                src = self.get_parameter('fric_src').value
+                dq_plan = np.linalg.pinv(J) @ Vd
+                if src == 'actual':
+                    dq_d = dqa
+                elif src == 'both':
+                    # [11/24] 손 목표가 움직이는 관절(들기·내려놓기)은 계획 속도 (MR (11.32)): 정지 마찰에 걸려 멈춰도 계획 방향으로 보상이 남음
+                    #   (측정 속도만 쓰면 멈춘 관절의 보상이 0 → 들기 중 한 팔이 z 데드밴드 F_fric,z/K_z ≈ 20 mm에 걸려 박스가 2 ~ 6° 기움, 11/24 A·B)
+                    #   목표가 멈춘 관절(베이스 오차를 따라 밀릴 때)은 측정 속도 (MR (11.65) η̃(θ, ẋ))
+                    dq_d = np.where(np.abs(dq_plan) > P('fric_vel_eps').item(), dq_plan, dqa)
+                else:
+                    dq_d = dq_plan
                 sgn = np.where(np.abs(dq_d) > P('fric_vel_eps').item(), np.sign(dq_d), 0.0)
                 tau_fric = P(f'fric_c_{a.side}') * sgn + P(f'fric_b_{a.side}') * dq_d
             # [문서 #2] τ_cmd = τ_task + g + τ_null (+ 피드포워드), 포화

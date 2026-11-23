@@ -1,0 +1,7 @@
+# 11/24 내려놓기 수정(손 목표 x·y 재설정) 확인: 실패했던 C1·E3·G2 조건 재실행 + 추가 1회씩
+C1r_K110_both|110 510 400|on|rviz|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+E3r_s020_K30_both|30 510 400|on|rviz|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s020.yaml
+G2r_gz_s020_K30_both|30 510 400|on|gazebo|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s020.yaml
+C4_K110_both|110 510 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+E7_s020_K30_both|30 510 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s020.yaml
+H4_K40_both|40 40 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml

@@ -6,7 +6,7 @@
 4 베이스 이동 [문서 밖, 현대 파트]: /carry/lift_done=True → /carry/start_base_move 서비스 → /carry/base_move_done=True
   (현대 base_move_node가 두 로봇 cmd_vel로 스워브 주행, 방향·거리·시간은 현대 base_move.yaml — 월드 y +2 m, 5차 속도 MR 9.2)
   → 두 베이스가 따로 주행하며 생기는 위치 오차를 팔로워의 부드러운 xy 강성이 흡수 (내력 ≈ K_F·오차, 문서 #7)
-5 내려놓기: −(lift − 1 cm) → 마지막 1 cm → 피드포워드 끄기(무게를 받침대로 천천히 넘김) → 그리퍼 열기
+5 내려놓기: 팔로워 강성 → 리더 값(베이스 정지 후) → −(lift − 1 cm) → 마지막 1 cm → 피드포워드 끄기(무게를 받침대로 천천히 넘김) → 그리퍼 열기
 6 팔 빼기(손잡이에서 −x로 빼고 조금 올림) — 기본 위치 제어(QP), --retract_mode impedance면 토크 모드로 뺀 뒤 위치 복귀
 8 판정: 박스가 받침대 위에 있고, 팔 뺄 때 끌려오지 않았는지(Gazebo 박스 위치, 기록용)
 
@@ -26,6 +26,7 @@ import rclpy
 import yaml
 from geometry_msgs.msg import Vector3
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.time import Time
 from robotis_interfaces.msg import MoveL
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -43,7 +44,7 @@ ap.add_argument('--box_mass', type=float, default=2.0)
 GAINS = yaml.safe_load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gains.yaml')))   # gain_design.py 결과
 ap.add_argument('--K_leader', type=float, nargs=3, default=GAINS['leader_K_pos'])
 ap.add_argument('--K_follower', type=float, nargs=3, default=GAINS['follower_K_pos'])
-ap.add_argument('--move', type=float, default=4.0)
+ap.add_argument('--move', type=float, default=3.0, help='손 목표 이동 시간 [s, 시뮬] = impedance_node move_time')
 ap.add_argument('--retract', type=float, default=0.12, help='놓은 뒤 손을 박스에서 빼는 거리 [m] (각 base_link −x)')
 ap.add_argument('--retract_up', type=float, default=0.03, help='빼면서 함께 올리는 높이 [m] (손잡이에 손가락이 걸리지 않게)')
 ap.add_argument('--retract_time', type=float, default=3.0, help='팔 빼기 이동 시간 [s]')
@@ -55,7 +56,9 @@ if not math.isfinite(a.base_timeout) or a.base_timeout <= 0:
 robots = [a.leader, a.follower]
 
 rclpy.init()
-n = Node('transport_scenario')
+# [11/24] 시뮬 시간 사용: 단계 대기(spin)를 시뮬 시간으로 — RTF 5 ~ 15 %에서 벽시계 3 s는 시뮬 0.15 ~ 0.45 s라
+#   무게 피드포워드 램프(1.43 s)·손 정착이 끝나기 전에 그리퍼를 열어 박스가 1.7 ~ 3 cm 떨어짐 (11/24 A1·B1). 실물은 시뮬 시간 = 벽시계
+n = Node('transport_scenario', parameter_overrides=[Parameter('use_sim_time', value=True)])
 pub = {(r, s, k): n.create_publisher(Vector3 if k in ('offset', 'stiffness') else Float64, f'/{r}/impedance/{s}/{k}', 10)
        for r in robots for s in 'rl' for k in ('offset', 'stiffness', 'weight', 'gripper')}
 # [문서 밖] 현대 base_move_node 인터페이스 (이름·QoS 그대로)
@@ -98,11 +101,22 @@ def put(r, k, value):
         pub[r, s, k].publish(msg)
 
 
-def spin(sec):
+def spin_wall(sec):
     """[문서 밖] 콜백(TF·베이스 상태)을 받으려면 노드를 돌려야 함 (time.sleep으로는 콜백이 안 돎)"""
     t_end = time.time() + sec
     while time.time() < t_end:
         rclpy.spin_once(n, timeout_sec=0.02)
+
+
+def spin(sec, wall_max=900.0):
+    """시뮬 시간으로 sec만큼 기다림 (grasp_sequence.spin_sim과 같은 방식). /clock이 없으면 벽시계"""
+    t_wall = time.time()
+    rclpy.spin_once(n, timeout_sec=0.05)
+    t0 = n.get_clock().now().nanoseconds * 1e-9
+    if t0 == 0.0:
+        return spin_wall(sec)
+    while n.get_clock().now().nanoseconds * 1e-9 - t0 < sec and time.time() - t_wall < wall_max:
+        rclpy.spin_once(n, timeout_sec=0.01)
 
 
 def step(name, wait):
@@ -182,22 +196,37 @@ def abort_transport(reason):
 
 th = threading.Thread(target=box_monitor, daemon=True)
 th.start()
+# [11/24] 단계 대기 = 필요한 시간만 (시뮬 시간): 목표 궤적 move_time + 2 % 정착 시간 T_s = 5.8/ω_n (ζ = 1, GAIN_RATIONALE ⑦ 표)
+#   z (K 400, Λ 5 ~ 6 kg): 0.72 s,  리더 xy (K 500): 0.55 s,  팔로워 xy (K 40): 2.0 s,  무게 램프 weight_ramp 1.43 s
+TS_Z, TS_XY_L, TS_XY_F = 0.72, 0.55, 2.0
 put(a.leader, 'stiffness', a.K_leader)
 put(a.follower, 'stiffness', a.K_follower)
-step(f'1 강성: 리더 {a.K_leader}, 팔로워 {a.K_follower}', 2.0)
+step(f'1 강성: 리더 {a.K_leader}, 팔로워 {a.K_follower}', TS_XY_F)
 for r in robots:
     put(r, 'weight', a.box_mass / 2)
-step(f'2 무게 피드포워드 로봇당 {a.box_mass/2} kg (램프 {GAINS["weight_ramp"]} s 시뮬 시간)', 8.0)
+step(f'2 무게 피드포워드 로봇당 {a.box_mass/2} kg (램프 {GAINS["weight_ramp"]} s 시뮬 시간)', GAINS['weight_ramp'] + TS_Z)
 for r in robots:
     put(r, 'offset', (0.0, 0.0, a.lift))
-step(f'3 들기 +{a.lift*100:.0f} cm', a.move + 2.0)
+step(f'3 들기 +{a.lift*100:.0f} cm', a.move + TS_Z)
 # 4 베이스 이동 — 실패하면 아래 내려놓기 단계에 도달하지 않는다.
 try:
     run_base_move()
 except (Exception, KeyboardInterrupt) as exc:
     abort_transport(str(exc) or '사용자 중단')
 lift_pub.publish(Bool(data=False))
-step('   베이스 도착', 3.0)
+step('   베이스 도착', 0.5)
+# [11/24] 베이스가 멈추면 흡수할 베이스 간 오차가 없음 → 팔로워 강성을 리더 값으로 (팔로워를 부드럽게 둔 이유는 베이스 오차 흡수뿐, GAIN_RATIONALE ⑥)
+#   보상 있음(B1~B3)에서 주행 중 밀린 팔로워 손(x −31 mm)이 K_F 40 × 31 mm = 1.2 N < 정지 마찰이라 제자리로 못 돌아옴
+#   (측정 속도 기반 보상은 정지 시 0) → 박스가 기운 채 한쪽만 받침대에 닿고 팔 뺄 때 끌려옴 → K_L로 올려 목표 복귀 후 내려놓기
+def ee(r, s):
+    """현대 robot_state_publisher TF: 각 로봇 base_link 기준 손끝 위치·방향"""
+    tr = tf_buffer.lookup_transform(f'{r}/base_link', f'{r}/end_effector_{s}_link', Time()).transform
+    return (np.array([tr.translation.x, tr.translation.y, tr.translation.z]),
+            (tr.rotation.x, tr.rotation.y, tr.rotation.z, tr.rotation.w))
+
+
+put(a.follower, 'stiffness', a.K_leader)
+step(f'   팔로워 강성 {list(a.K_follower)} → 리더 값 {list(a.K_leader)} (베이스 정지 후, 내려놓기 준비)', 4.0)   # 4 s: B4에서 검증. 이론 정착 0.55 s로 줄인 B5는 정지 마찰로 손이 덜 돌아와 끌림 122 mm
 # 파지 순간 박스가 받침대에서 들려 있던 높이(접촉 감지 뒤 쥐며 들림, 11/5 실측 1.3 cm)만큼 더 내려야 받침대에 닿음
 box_cfg = yaml.safe_load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src/coop_carry_bringup/config/robots.yaml')))['box']
 z_rest = box_cfg['center_base'][2]          # 받침대 위 박스 중심 높이 (base z 0)
@@ -208,23 +237,16 @@ print(f'   파지 시 박스 들림 {z_extra*1000:.1f} mm → 내려놓기 총 {
 #   K_z·오차로 누르는 힘이 작음(문서 #4 e = F/K) → 한쪽 모서리만 눌려 박스가 기우는 것을 막음
 for r in robots:
     put(r, 'offset', (0.0, 0.0, -(a.lift + z_extra - 0.01)))
-step(f'5 내려놓기 −{(a.lift + z_extra - 0.01)*100:.1f} cm (받침대 1 cm 위)', a.move + 1.0)
+step(f'5 내려놓기 −{(a.lift + z_extra - 0.01)*100:.1f} cm (받침대 1 cm 위)', a.move + TS_Z)
 for r in robots:
     put(r, 'offset', (0.0, 0.0, -0.01))
-step('   마지막 1 cm', a.move + 1.0)
+step('   마지막 1 cm', a.move + TS_Z)
 for r in robots:
     put(r, 'weight', 0.0)
-step('   피드포워드 끄기 (무게를 받침대로)', 3.0)
+step('   피드포워드 끄기 (무게를 받침대로)', GAINS['weight_ramp'] + TS_Z)
 for r in robots:
     put(r, 'gripper', 0.0)
 step('   그리퍼 열기', 2.0)
-
-
-def ee(r, s):
-    """현대 robot_state_publisher TF: 각 로봇 base_link 기준 손끝 위치·방향"""
-    tr = tf_buffer.lookup_transform(f'{r}/base_link', f'{r}/end_effector_{s}_link', Time()).transform
-    return (np.array([tr.translation.x, tr.translation.y, tr.translation.z]),
-            (tr.rotation.x, tr.rotation.y, tr.rotation.z, tr.rotation.w))
 
 
 # 6 팔 빼기 — 손잡이에서 손가락을 빼고(각 base_link −x = 박스 반대쪽) 조금 올림.
@@ -258,12 +280,12 @@ else:
         goal_pub[r, s].publish(g)
     events.append(('7 팔 빼기(QP)', time.time()))
     print(f'[{time.strftime("%H:%M:%S")}] 7 팔 빼기(QP) −x {a.retract*100:.0f} cm, +z {a.retract_up*100:.0f} cm', flush=True)
-    # QP 이동 시간은 시뮬 시간 — RTF < 1이면 벽시계로 더 걸림 → 목표 2 cm 안에 들어오거나 30 s까지 기다림
-    t_end = time.time() + 30.0
+    # QP 이동 시간은 시뮬 시간 → 목표 2 cm 안에 들어오거나 시뮬 시간 retract_time + 10 s까지 기다림 (11/24: 벽시계 30 s → 시뮬 시간)
+    t_end = n.get_clock().now().nanoseconds * 1e-9 + a.retract_time + 10.0
     while True:
         spin(1.0)
         err = {k: float(np.linalg.norm(goal[k][0] - ee(*k)[0])) for k in goal}
-        if max(err.values()) < 0.02 or time.time() > t_end:
+        if max(err.values()) < 0.02 or n.get_clock().now().nanoseconds * 1e-9 > t_end:
             break
     print('   팔 빼기 위치 오차 [mm]: ' + ' '.join(f'{r[-1]}{s}:{e*1000:.0f}' for (r, s), e in err.items()), flush=True)
     if max(err.values()) > 0.02:
@@ -280,16 +302,19 @@ if len(rows) >= 2:
     xf, yf, zf, rf, pf, _ = rows[-1][1:]
     t_rel = next((t for k, t in events if '그리퍼 열기' in k), None)
     at_rel = min(rows, key=lambda r: abs(r[0] - t_rel))[1:4] if t_rel else rows[-1][1:4]
-    moved = float(np.linalg.norm(np.array([xf, yf, zf]) - np.array(at_rel)))
+    # [11/24] 놓은 뒤 변화를 둘로 나눔: 수평으로 끌림(팔 빼기 때 손가락이 손잡이에 걸림) / 수직 낙하(그리퍼를 열 때 박스가 받침대 위에 떠 있었음)
+    drag = float(np.hypot(xf - at_rel[0], yf - at_rel[1]))
+    drop = float(at_rel[2] - zf)
     tilt = math.degrees(max(abs(rf), abs(pf)))
     tilt_max = math.degrees(max(max(abs(r[4]), abs(r[5])) for r in rows))
     cfg = yaml.safe_load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src/coop_carry_bringup/config/robots.yaml')))
     tw = cfg.get('box', {}).get('table_size', [0.30, 0.40])   # 받침대 x, y 크기
     on_stand = abs(xf - x0) < tw[0] / 2 and abs((yf - y0) - a.dy) < tw[1] / 2 and abs(zf - z0) < 0.02
     print(f'박스 시작 ({x0:.3f}, {y0:.3f}, {z0:.3f}) → 최종 ({xf:.3f}, {yf:.3f}, {zf:.3f}) m, '
-          f'놓은 뒤 이동 {moved*1000:.0f} mm, 최종 기울기 {tilt:.1f}° (운반 중 최대 {tilt_max:.1f}°)')
-    print('판정:', '받침대 위에 수평으로 놓고 팔 뺌 — 성공' if on_stand and moved < 0.01 and tilt < 2.0 else
-          '확인 필요 (받침대 밖·기울어짐·팔 뺄 때 박스가 끌려옴 중 하나)')
+          f'놓을 때 낙하 {drop*1000:.0f} mm, 팔 뺄 때 끌림 {drag*1000:.0f} mm, 최종 기울기 {tilt:.1f}° (운반 중 최대 {tilt_max:.1f}°)')
+    fails = [w for w, bad in (('받침대 밖', not on_stand), ('놓을 때 1 cm 넘게 낙하', drop >= 0.01),
+                              ('팔 뺄 때 1 cm 넘게 끌림', drag >= 0.01), ('기울기 2° 이상', tilt >= 2.0)) if bad]
+    print('판정:', '받침대 위에 수평으로 놓고 팔 뺌 — 성공' if not fails else '확인 필요 — ' + ', '.join(fails))
 print(f'기록: {box_log}\n분석: python3 analyze.py carry {box_log}')
 n.destroy_node()
 rclpy.shutdown()

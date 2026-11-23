@@ -1,0 +1,17 @@
+# 11/24 최종 재측정 (전달자료 P0-3 행렬). 보상 = fric_src both (계획 속도 MR 11.32 + 측정 속도 MR 11.65). 줄 형식: tag|K_follower|fric|rec|K_leader|베이스 yaml
+H2_K40_both|40 40 400|on|rviz|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+C1_K110_both|110 510 400|on|rviz|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+D1_K500_both|500 500 400|on|rviz|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+H3_K40_both|40 40 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+C2_K110_both|110 510 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+D2_K500_both|500 500 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+C3_K110_both|110 510 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+D3_K500_both|500 500 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+E1_s020_K110_both|110 510 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s020.yaml
+E2_s020_K110_both|110 510 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s020.yaml
+E3_s020_K30_both|30 510 400|on|rviz|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s020.yaml
+E4_s020_K30_both|30 510 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s020.yaml
+E5_s020_K500_both|500 500 400|on|rviz|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s020.yaml
+E6_s020_K500_both|500 500 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s020.yaml
+G1_gz_s0575_K110_both|110 510 400|on|gazebo|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+G2_gz_s020_K30_both|30 510 400|on|gazebo|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s020.yaml

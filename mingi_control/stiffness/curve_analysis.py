@@ -24,13 +24,15 @@ HANDS = ['robot1_r', 'robot1_l', 'robot2_r', 'robot2_l']
 
 
 def window(prefix):
-    t0 = t1 = None
+    t0 = t1 = final = None
     for line in open(prefix + '_status.jsonl'):
         d = json.loads(line)
         if d['state'] == 'MOVING' and t0 is None:
             t0 = d['t_wall']
         if d['state'] in ('DONE', 'FAULT') and t0 is not None and t1 is None:
             t1 = d['t_wall']; final = d
+    if t0 is None or t1 is None:
+        raise ValueError(f'{prefix}: 주행 구간(MOVING ~ DONE/FAULT) 없음 — 베이스가 출발하지 않은 런')
     return t0, t1, final
 
 
@@ -76,7 +78,42 @@ def box(prefix, t0, t1):
     B = np.array([[float(r[k]) for k in ('t', 'x', 'y', 'z', 'roll', 'pitch')] for r in rows])
     m = (B[:, 0] >= t0) & (B[:, 0] <= t1)
     tilt = np.degrees(np.hypot(B[:, 4], B[:, 5]))
-    return dict(tilt_move=tilt[m].max() if m.any() else np.nan, final=B[-1, 1:4], tilt_final=tilt[-1])
+    return dict(tilt_move=tilt[m].max() if m.any() else np.nan, final=B[-1, 1:4], tilt_final=tilt[-1], t=B[:, 0], tilt=tilt, z=B[:, 3])
+
+
+def rolling_median(t, v, w=1.0):
+    j0 = np.searchsorted(t, t - w)
+    return np.array([np.median(v[j:i + 1]) for i, j in enumerate(j0)])
+
+
+def base_check(r):
+    """[11/24] 베이스 합격 기준 (전달자료 P0): 출발 시각 차 < 0.2 s, 최종 위치 오차 < 0.05 m, Δy 최대 < 0.05 m, Δx 최대 ≈ 지령 side_offset.
+    출발 = 패턴 시작 후 주행 방향으로 5 cm 전진한 시뮬 시각 (지령상 1.3 s)"""
+    b = r['base']; m = b['m']
+    ts = b['ts'] - b['ts'][b['i0']]
+    start = {}
+    for k, p in (('robot1', b['p1']), ('robot2', b['p2'])):
+        prog = p[:, 1] - p[b['i0'], 1]
+        idx = np.where(m & (prog > 0.05))[0]
+        start[k] = ts[idx[0]] if len(idx) else np.nan
+    fin = r['final']['robots']
+    d = b['d'][m]
+    return dict(start=start, dstart=abs(start['robot1'] - start['robot2']),
+                final_err=max(fin[k].get('target_error', np.nan) for k in fin),
+                dx_max=np.abs(d[:, 0]).max(), dy_max=np.abs(d[:, 1]).max(),
+                side_offset=r['final'].get('side_offset', np.nan), invalid=r['final'].get('tracking_invalid', ''),
+                max_lag=r['final'].get('max_lag', np.nan))
+
+
+def force_metrics(r, t_end_sim=10.0):
+    """곡선 주행 중 손 내력: 4손 중앙값의 1 s 이동 중앙값 → 런 중앙값·최대. 박스가 5° 넘게 기울면 그 앞까지 (손이 빈 뒤는 제외)"""
+    b, h = r['base'], r['hand']
+    tsh = np.interp(h['t'], b['t'], b['ts']) - b['ts'][b['i0']]
+    t_drop = r['box']['t_drop'] if r.get('box') else None
+    te = min(t_end_sim, t_drop) if t_drop is not None else t_end_sim
+    mm = (tsh >= 0) & (tsh <= te)
+    roll = rolling_median(tsh[mm], np.median(h['nint'][mm], axis=1))
+    return dict(med=float(np.median(roll)), peak=float(roll.max()), t_end=te)
 
 
 def analyze(d, tag):
@@ -91,6 +128,11 @@ def analyze(d, tag):
             out[k] = f(pre, t0, t1)
         except (FileNotFoundError, ValueError, IndexError):
             out[k] = None
+    B = out.get('box')
+    if B is not None:   # 박스 낙하 시각 (패턴 시뮬 시간): 박스 중심 높이 < 0.5 m (파지 0.87 m, 바닥 0.075 m 사이 어느 값이든 같음) [AI]
+        tsb = np.interp(B['t'], b['t'], b['ts']) - b['ts'][b['i0']]
+        k = np.where((tsb >= 0) & (tsb <= 10.0) & (B['z'] < 0.5))[0]
+        B['t_drop'] = float(tsb[k[0]]) if len(k) else None
     return out
 
 
@@ -98,7 +140,16 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--dir', required=True)
     ap.add_argument('--tags', nargs='+', required=True)
+    ap.add_argument('--base', action='store_true', help='베이스 합격 기준 표만')
     a = ap.parse_args()
+    if a.base:
+        print('tag              | 출발 R1/R2 [s] (차) | 최종 위치 오차 [m] | Δx 최대 (지령) | Δy 최대 | 추종 무효 | 합격')
+        for tag in a.tags:
+            c = base_check(analyze(a.dir, tag))
+            ok = c['dstart'] < 0.2 and c['final_err'] < 0.05 and c['dy_max'] < 0.05 and not c['invalid']
+            print(f"{tag:16s} | {c['start']['robot1']:.2f}/{c['start']['robot2']:.2f} ({c['dstart']:.2f}) | {c['final_err']:.3f} | "
+                  f"{c['dx_max']*1e3:.0f} ({c['side_offset']*1e3:.0f}) mm | {c['dy_max']*1e3:.0f} mm | {c['invalid'] or '-'} | {'○' if ok else '✖'}")
+        raise SystemExit
     print('tag            | Δx max  Δy max  |Δ|max  Δyaw max | Δx end  Δy end | R1 전진  R2 전진 | 손 내력 중앙값 [N] 출발 전 20 s → 주행 중 (손별 r1r r1l r2r r2l) | 주행 중 월드 성분 중앙값 | 리더 |e| x/y max [mm] | 박스 기울기 이동중/끝, 최종 xyz')
     for tag in a.tags:
         r = analyze(a.dir, tag)
