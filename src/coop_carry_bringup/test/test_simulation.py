@@ -88,6 +88,8 @@ def test_two_external_models_have_no_internal_managers(tmp_path, base_mode):
     }
     if settings.get("control_mode") == "effort":
         expected |= {f"/sim/{robot}/effort" for robot in ("robot1", "robot2")}
+        # [김민기 11/22] effort 모드: 손목 F/T 센서 (gripper_{r,l}_joint)
+        expected |= {f"/sim/{robot}/ft_{s}" for robot in ("robot1", "robot2") for s in ("r", "l")}
     if base_mode == "swerve":
         expected |= {
             f"/sim/{robot}/{topic}"

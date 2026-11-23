@@ -17,7 +17,8 @@ from rclpy.signals import SignalHandlerOptions
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
-from .base_interface import MockBaseInterface, SwerveBaseInterface
+from .base_curve import CurveProfile
+from .base_interface import MockBaseInterface, SwerveBaseInterface, world_to_body
 from .base_sequence import BaseSequence, MoveSettings
 from .command_client import require_simulation
 
@@ -77,6 +78,28 @@ class BaseMoveNode(Node):
         self.align_detect = self.declare_parameter("align_detect", 0.003).value   # [m/s] 차체 실측 속도 > 이 값 = 구동 시작
         self.align_timeout = self.declare_parameter("align_timeout", 15.0).value  # [s, 시뮬 시간]
         self.aligning = None
+        # [김민기 11/24] 아래는 모두 기본 꺼짐 = 기존 동작 그대로. 박스 파지 곡선 주행에서 출발 지연(정렬 오탐) 수정용
+        #  align_mode 'steering': 차체 속도 대신 두 로봇 조향 관절 3개가 모두 이동 방향과 align_tol 이내로 align_hold 유지되면 정렬 완료
+        #     (박스를 쥐면 팔 반력으로 차체 속도가 align_detect를 넘어 바퀴가 돌기 전에 '정렬 완료' → 패턴 시작 후 구동이 막힘, 11/23 로그)
+        #     align_tol = 스워브 제어기 steering_alignment_start_angle_error_threshold (model_factory.py 0.02 rad)
+        #  start_floor: 패턴 초반 지령 속도가 align_speed보다 작으면 align_speed로 (5차 프로파일 시작 속도 0 → 제어기가 정지 상태로 돌아가 재정렬하는 것 방지)
+        #  track_feedback: MR (11.17) ẋ = ẋ_d(t) + K_p (x_d(t) − x(t))를 경로 진행 방향 좌표에 적용 — 피드포워드 속도 크기에 진행 방향 위치 오차 비례항 (x = Gazebo 차체 자세)
+        #  lag_limit/lag_time: 한 로봇이 지령 위치에서 lag_limit 넘게 lag_time 이상 뒤처지면 상태에 tracking_invalid 기록 (비교에서 제외)
+        self.align_mode = self.declare_parameter("align_mode", "chassis").value
+        self.align_tol = self.declare_parameter("align_tol", 0.02).value          # [rad]
+        self.align_hold = self.declare_parameter("align_hold", 0.2).value         # [s, 시뮬 시간]
+        self.start_floor = self.declare_parameter("start_floor", False).value
+        self.track_feedback = self.declare_parameter("track_feedback", False).value
+        self.track_kp = self.declare_parameter("track_kp", 1.0).value             # [1/s]
+        self.lag_limit = self.declare_parameter("lag_limit", 0.05).value          # [m]
+        self.lag_time = self.declare_parameter("lag_time", 1.0).value             # [s, 시뮬 시간]
+        if not hasattr(self, "profile"):
+            self.profile = CurveProfile(self.settings, 0.0)                       # 직선 = 옆 이탈 0인 같은 프로파일
+        self.aligned_since = None
+        self.align_error = float("nan")
+        self.lag_since = {}
+        self.tracking_invalid = ""
+        self.max_lag = 0.0
         self.last_tick = self.created_at = time.monotonic()
         self.last_status = 0.0
         self.reported_state = None
@@ -91,8 +114,50 @@ class BaseMoveNode(Node):
     def configure_trajectory(self):
         """주행별 추가 파라미터를 검증한다. 직선 주행은 MoveSettings만 사용한다."""
 
+    def curved(self, robot):
+        """이 로봇이 옆 이탈을 하는가 (직선 주행은 모두 아님)"""
+        return False
+
+    def tracked_motion(self):
+        """[김민기 11/24] start_floor / track_feedback이 켜졌을 때의 로봇별 월드 속도 지령"""
+        elapsed = self.sim_time() - self.sequence.started_sim
+        norm = math.hypot(self.settings.direction_x, self.settings.direction_y)
+        sign = math.copysign(1.0, self.settings.distance)
+        forward = (sign * self.settings.direction_x / norm, sign * self.settings.direction_y / norm)
+        out = {}
+        for robot, state in self.interface.states.items():
+            vx, vy = self.profile.velocity(elapsed, curved=self.curved(robot))
+            if self.start_floor and elapsed < 0.5 * self.settings.duration and math.hypot(vx, vy) < self.align_speed:
+                n = math.hypot(vx, vy)
+                ux, uy = (vx / n, vy / n) if n > 1e-9 else forward
+                vx, vy = self.align_speed * ux, self.align_speed * uy
+            dx, dy = self.profile.position(elapsed, curved=self.curved(robot))
+            x0, y0 = self.initial_positions[robot]
+            ex, ey = x0 + dx - state.x, y0 + dy - state.y
+            if self.track_feedback:
+                # MR (11.17)을 경로 진행 방향 좌표에: v = (|ẋ_d| + K_p e_t) t̂,  t̂ = 피드포워드 방향, e_t = 위치 오차의 t̂ 성분.
+                # 지령 방향은 피드포워드 그대로 → 조향이 다시 정렬할 일이 없음 (조향 속도 ≈ 0.27 rad/s로 느려, 옆 성분 보정이
+                # 저속에서 방향을 크게 틀면 스워브 제어기가 구동을 막음, 11/24 t1 런). 뒤로 가지 않게 크기 ≥ 0
+                n = math.hypot(vx, vy)
+                tx, ty = (vx / n, vy / n) if n > 1e-9 else forward
+                speed = min(max(0.0, n + self.track_kp * (ex * tx + ey * ty)), self.settings.max_speed)
+                vx, vy = speed * tx, speed * ty
+            lag = math.hypot(ex, ey)
+            self.max_lag = max(self.max_lag, lag)
+            if lag > self.lag_limit:
+                self.lag_since.setdefault(robot, elapsed)
+                if elapsed - self.lag_since[robot] >= self.lag_time and not self.tracking_invalid:
+                    self.tracking_invalid = f"{robot} lag {lag:.3f} m > {self.lag_limit} m for {self.lag_time} s at t={elapsed:.2f} s"
+                    self.get_logger().warn(f"[SWERVE] 추종 무효: {self.tracking_invalid}")
+            else:
+                self.lag_since.pop(robot, None)
+            out[robot] = (vx, vy)
+        self.interface.command_each(out, self.initial_yaws)
+
     def command_motion(self):
         """기존 직선 속도를 두 로봇에 동일하게 전달한다."""
+        if getattr(self, "start_floor", False) or getattr(self, "track_feedback", False):
+            return self.tracked_motion()
         speed = self.sequence.speed(self.sim_time())
         norm = math.hypot(self.settings.direction_x, self.settings.direction_y)
         self.interface.command(
@@ -189,11 +254,33 @@ class BaseMoveNode(Node):
         ux, uy = sign * self.settings.direction_x / norm, sign * self.settings.direction_y / norm
         engaged = all(st.vx * ux + st.vy * uy > self.align_detect for st in self.interface.states.values())
         elapsed = self.sim_time() - self.aligning
+        if getattr(self, "align_mode", "chassis") == "steering":                     # [김민기 11/24] 조향 관절 기준
+            err = 0.0
+            for robot, st in self.interface.states.items():
+                bx, by = world_to_body(ux, uy, self.initial_yaws[robot])
+                target = math.atan2(by, bx)
+                if len(st.steer) != 3:
+                    err = float("inf"); break
+                # 바퀴는 뒤로도 구동하므로 π 차이는 같은 정렬 (오차를 [−π/2, π/2)로)
+                err = max(err, max(abs((q - target + math.pi / 2) % math.pi - math.pi / 2) for q in st.steer))
+            self.align_error = err
+            now = self.sim_time()
+            if err < self.align_tol:
+                self.aligned_since = now if self.aligned_since is None else self.aligned_since
+            else:
+                self.aligned_since = None
+            engaged = self.aligned_since is not None and now - self.aligned_since >= self.align_hold
         if engaged or elapsed > self.align_timeout:
             self.get_logger().info(
-                f"[SWERVE] {'정렬 완료' if engaged else '정렬 시간 초과'} ({elapsed:.2f} s) → 10초 패턴 시작"
+                f"[SWERVE] {'정렬 완료' if engaged else '정렬 시간 초과'} ({elapsed:.2f} s, mode={getattr(self, 'align_mode', 'chassis')}, "
+                f"조향 오차 {getattr(self, 'align_error', float('nan')):.4f} rad) → 10초 패턴 시작"
             )
             self.aligning = None
+            self.aligned_since = None
+            self.lag_since, self.tracking_invalid, self.max_lag = {}, "", 0.0
+            if getattr(self, "align_mode", "chassis") == "steering":
+                # 패턴 기준점 = 정렬이 끝난 순간 위치 (정렬 중 팔 반력으로 차체가 수 mm 밀린 것을 지령 오차로 보지 않음)
+                self.initial_positions = {r: (st.x, st.y) for r, st in self.interface.states.items()}
             self.sequence.start(self.sim_time(), time.monotonic())
 
     def reset(self, request, response):
@@ -234,6 +321,10 @@ class BaseMoveNode(Node):
                 else 0.0
             ),
             robots=positions,
+            align_mode=getattr(self, "align_mode", "chassis"),
+            track_feedback=getattr(self, "track_feedback", False),
+            tracking_invalid=getattr(self, "tracking_invalid", ""),
+            max_lag=getattr(self, "max_lag", 0.0),
         )
 
     def status(self, request, response):

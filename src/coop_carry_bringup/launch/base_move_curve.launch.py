@@ -9,6 +9,8 @@ from coop_carry_bringup.model_factory import share
 
 def setup(context):
     config = share("coop_carry_bringup") / "config"
+    # [김민기 11/24] params:=<yaml> 로 추가 파라미터(정렬 판정·폐루프 추종·side_offset 등)를 덮어씀. 기본(빈 값)은 기존과 같음
+    extra = LaunchConfiguration("params").perform(context)
     return [
         Node(
             package="coop_carry_bringup",
@@ -20,7 +22,7 @@ def setup(context):
                 str(config / "base_move.yaml"),
                 str(config / "base_move_curve.yaml"),
                 {"mode": LaunchConfiguration("mode").perform(context)},
-            ],
+            ] + ([extra] if extra else []),
         )
     ]
 
@@ -29,6 +31,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("mode", default_value="swerve"),
+            DeclareLaunchArgument("params", default_value=""),
             OpaqueFunction(function=setup),
         ]
     )

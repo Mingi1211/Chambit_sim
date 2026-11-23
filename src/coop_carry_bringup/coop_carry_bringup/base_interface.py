@@ -10,7 +10,7 @@ from nav_msgs.msg import Odometry
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 
-from .swerve_model import BASE_JOINTS, DRIVE_JOINTS
+from .swerve_model import BASE_JOINTS, DRIVE_JOINTS, STEERING_JOINTS
 
 ROBOTS = ("robot1", "robot2")
 
@@ -45,6 +45,8 @@ class BaseFeedback:
     joint_received: float = 0.0
     stamp: float = -1.0
     joint_stamp: float = -1.0
+    # [김민기 11/24] 조향 관절 각도 [rad] (left, right, rear) — 관절 기준 정렬 판정(align_mode=steering)용
+    steer: tuple = ()
 
 
 class MockBaseInterface:
@@ -190,6 +192,7 @@ class SwerveBaseInterface:
         ):
             return
         state.wheel_speed = max(abs(velocities[name]) for name in DRIVE_JOINTS)
+        state.steer = tuple(positions[name] for name in STEERING_JOINTS)
         state.joint_stamp, state.joint_received = stamp, time.monotonic()
 
     def update(self, dt):

@@ -12,7 +12,12 @@ class BaseMoveCurveNode(BaseMoveNode):
         side_offset = self.declare_parameter("side_offset", 0.03).value
         self.profile = CurveProfile(self.settings, side_offset)
 
+    def curved(self, robot):
+        return robot == "robot1"
+
     def command_motion(self):
+        if getattr(self, "start_floor", False) or getattr(self, "track_feedback", False):
+            return self.tracked_motion()
         elapsed = self.sim_time() - self.sequence.started_sim
         self.interface.command_each(
             {
