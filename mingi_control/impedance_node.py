@@ -132,7 +132,9 @@ class ImpedanceNode(Node):
         #  fric_ff: MR (11.32) 계획 궤적 피드포워드 τ = h̃(θ_d, θ̇_d)의 마찰 몫 = f_c·sgn(q̇_d) + b·q̇_d (MR 8.9.4 그림 8.13(c))
         #  dgear:   MR (11.25)(11.26) ζ = (b + K_d)/(2√(K_p M)) — 관절 점성 b가 감쇠에 더해짐 → 작업공간 D_gear = J̄ᵀ diag(b) J̄ 만큼 D에서 뺌
         #           (작업공간으로 옮기는 식은 MR에 그대로 없음: τ = −b q̇, q̇ = J̄ ẋ, F = J̄ᵀ τ 에서 유도 △)
-        d('fric_ff', False); d('dgear', False)
+        #  fric_src: 'desired' = 위 (11.32) θ̇_d 기준 / 'actual' = MR (11.65) 팔 동역학 보상 η̃(θ, ẋ)처럼 측정 속도 q̇로 h̃의 마찰 몫 계산
+        #            (11/23: 곡선 주행 중 손 목표가 고정(V_d = 0)이면 'desired'는 0 → 팔로워가 베이스 오차를 따라 움직일 때의 마찰은 'actual'로만 보상)
+        d('fric_ff', False); d('dgear', False); d('fric_src', 'desired')
         d('fric_c_r', [0.0] * 7); d('fric_c_l', [0.0] * 7)    # 쿨롱 [N·m] — 제어기가 "안다고 보는" 값 (플랜트 값과 다르게 줘서 민감도 시험 가능)
         d('fric_b_r', [0.0] * 7); d('fric_b_l', [0.0] * 7)    # 점성 [N·m·s/rad]
         d('fric_vel_eps', 1e-3)                               # [문서 밖] 계획 속도가 이보다 작으면 sgn = 0 (논문 식 (9) sgn(0)=0, 수치 떨림 방지) [rad/s]
@@ -306,7 +308,7 @@ class ImpedanceNode(Node):
             # 11/16 마찰 피드포워드: 계획 속도 q̇_d = J⁺ V_d (최소 노름) → f_c·sgn(q̇_d) + b·q̇_d. 정지 목표(V_d = 0)면 0
             tau_fric = np.zeros(len(vi))
             if self.get_parameter('fric_ff').value:
-                dq_d = np.linalg.pinv(J) @ Vd
+                dq_d = dqa if self.get_parameter('fric_src').value == 'actual' else np.linalg.pinv(J) @ Vd
                 sgn = np.where(np.abs(dq_d) > P('fric_vel_eps').item(), np.sign(dq_d), 0.0)
                 tau_fric = P(f'fric_c_{a.side}') * sgn + P(f'fric_b_{a.side}') * dq_d
             # [문서 #2] τ_cmd = τ_task + g + τ_null (+ 피드포워드), 포화
