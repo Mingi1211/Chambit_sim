@@ -181,7 +181,24 @@ def _add_effort_path(physics, gazebo, actuator, robot):
             reference = ET.SubElement(physics, "gazebo", {"reference": link.get("name")})
             ET.SubElement(reference, "mu1").text = str(robot.get("finger_mu", 1.0))
             ET.SubElement(reference, "mu2").text = str(robot.get("finger_mu", 1.0))
-    return [
+    # 손목 힘/토크 센서 (11/22): 손목(link7)–그리퍼 고정 관절 gripper_{r,l}_joint = 논문(Liu) 손목 F/T 위치.
+    # URDF→SDF 변환에서 고정 관절이 합쳐지지 않게 preserveFixedJoint, 센서는 그 관절에 (gz-sim ForceTorque 시스템이 계산)
+    bridge = []
+    for side in ("r", "l"):
+        if physics.find(f"joint[@name='gripper_{side}_joint']") is None:
+            continue
+        reference = ET.SubElement(physics, "gazebo", {"reference": f"gripper_{side}_joint"})
+        ET.SubElement(reference, "preserveFixedJoint").text = "true"
+        sensor = ET.SubElement(reference, "sensor", {"name": f"ft_{side}", "type": "force_torque"})
+        ET.SubElement(sensor, "always_on").text = "1"
+        ET.SubElement(sensor, "update_rate").text = str(robot.get("state_rate", 100))
+        ET.SubElement(sensor, "topic").text = f"/sim/{name}/ft_{side}"
+        ft = ET.SubElement(sensor, "force_torque")
+        ET.SubElement(ft, "frame").text = "child"
+        ET.SubElement(ft, "measure_direction").text = "parent_to_child"
+        bridge.append(dict(ros_topic_name=f"/sim/{name}/ft_{side}", gz_topic_name=f"/sim/{name}/ft_{side}",
+                           ros_type_name="geometry_msgs/msg/WrenchStamped", gz_type_name="gz.msgs.Wrench", direction="GZ_TO_ROS"))
+    return bridge + [
         dict(
             ros_topic_name=f"/sim/{name}/effort",
             gz_topic_name=f"/sim/{name}/effort",
@@ -215,6 +232,9 @@ def configure_effort_world(world, robots_file):
     physics.find('real_time_update_rate').text = '1000'
     ET.SubElement(world, 'plugin', {'name': 'gz::sim::systems::ApplyLinkWrench',
                                     'filename': 'gz-sim-apply-link-wrench-system'})
+    # 손목 힘/토크 센서 계산 시스템 (11/22). 렌더링 없이 동작 (Sensors 시스템과 별개)
+    ET.SubElement(world, 'plugin', {'name': 'gz::sim::systems::ForceTorque',
+                                    'filename': 'gz-sim-forcetorque-system'})
     config = yaml.safe_load(Path(robots_file).read_text())
     box = config.get('box')
     if not box:
