@@ -1,0 +1,10 @@
+# 11/24 팔로워 강성 확인 (마찰 원뿔 부등식 K_F ≤ 406 N/m, x = y, 작은 값부터). 리더 500, z 400, 보상 both, 옆 이탈 0.0575 m
+F110a|110 110 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+F110b|110 110 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+F110c|110 110 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+F240a|240 240 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+F240b|240 240 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+F240c|240 240 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+F400a|400 400 400|on|rviz|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+F400b|400 400 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+F400c|400 400 400|on|none|500 500 400|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml

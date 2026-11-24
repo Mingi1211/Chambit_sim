@@ -48,3 +48,8 @@ LOG=/tmp/curve_queue bash run/queue.bash run/q_final.txt          # 전체 (런�
 python3 final_table.py                                             # 조건별 표
 python3 curve_analysis.py --dir ../../real_logs/1124_final --tags A1_K40_off H1_K40_both --base
 ```
+
+### 11/24 결론 (MR 기준)
+- 허용 내력 = 손잡이 쿨롱 마찰 원뿔 (MR 12.2.1) μ(2N + mg/4) = 36.4 N, 내력 정의 MR (12.26)(12.27). 게인 문서 15 N·이산화 상한은 쓰지 않음
+- 팔로워 상한: √((F_s,x + K_F Δx)² + (F_s,y + K_F Δy)²) ≤ 36.4 N, Δ = 곡선 주행 실측 최대 (64.8 / 1.6 mm) → **K_F ≤ 406 N/m**, 하한 없음 (`k_window.py`)
+- 적정 **K_F = 40 N/m (x = y)**: 손별 수평 내력 주행 중 최대 24 ~ 27.6 N < 36.4, 낙하 0/4, 내려놓기 3/3
