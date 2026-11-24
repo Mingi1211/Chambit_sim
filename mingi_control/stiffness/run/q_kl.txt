@@ -1,0 +1,4 @@
+# 11/24 리더 강성 = MR 하한 그대로 (531, 180, 837) [K_L ≥ F_dist/e_allow], 팔로워 (40, 40, 837) [z 공통], 보상 both, 옆 이탈 0.0575 m
+L1|40 40 837|on|rviz|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+L2|40 40 837|on|none|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+L3|40 40 837|on|none|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml

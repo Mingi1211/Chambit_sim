@@ -1,0 +1,11 @@
+# 11/24 저녁 최종 설계값 데이터셋: 리더 K_L = MR 하한 (531, 180, 837), 팔로워 K_F (40, 40, 837) / 상한 초과 비교 (500, 500, 837). 옆 이탈 0.0575 m
+L5|40 40 837|on|rviz|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+M1|40 40 837|off|rviz|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+P1|500 500 837|on|rviz|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+L6|40 40 837|on|gazebo|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+M2|40 40 837|off|none|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+M3|40 40 837|off|none|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+L3|40 40 837|on|none|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+P2|500 500 837|on|none|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+L7|40 40 837|on|none|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml
+L8|40 40 837|on|none|531 180 837|/home/mingi/Desktop/Chambit_Sim/mingi_control/stiffness/run/base_fix_s00575.yaml

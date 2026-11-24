@@ -11,6 +11,11 @@
   ③ 팔로워 상한: 베이스 오차가 가장 클 때도 원뿔 안 — √((F_s,x + K_F Δx)² + (F_s,y + K_F Δy)²) ≤ F_cone  (K_F x = y)
      F_s = 마찰 보상 후 박스 들고 정지 중 남는 손 내력 (실측), Δ = 곡선 주행 실측 최대 (벌어짐·좁아짐 중 큰 값)
      변위(베이스 오차)가 주어지고 힘을 제한 → 상한. 팔로워의 베이스 오차 방향에는 위치를 지킬 요구가 없어 하한 없음
+  ④ 리더 하한: 리더 손 위치 = 박스 위치 → 외란 힘이 주어지고 위치 오차를 제한 → K_L ≥ F_dist / e_allow (MR (11.64) e = F/K)
+     F_dist = 정지 마찰 |J̄ᵀ| b_static (멈춰 있으면 보상 0 → 최악값) + 팔로워 내력 K_F Δ
+     e_allow (과제 조건) = 받침대 반폭 (박스 중심이 받침대 위) − 베이스 최종 위치 오차, z는 내려놓기 마지막 단계
+     z는 두 로봇이 무게를 같이 듦 → 리더·팔로워 같은 값 (다르면 같은 하중에 처짐이 달라 박스가 기움)
+     상한: MR에 정량식 없음 (11.7.1 서술만), 정상상태 토크 Jᵀ K e = Jᵀ F_dist는 K와 무관 → 정하지 않음
 사용: python3 k_window.py --urdf ../../real_logs/robot_description.urdf --delta 0.0648 0.0016 --F_s 9.4 6.1
 """
 import argparse
@@ -30,6 +35,9 @@ ap.add_argument('--urdf', required=True)
 ap.add_argument('--delta', type=float, nargs=2, required=True, help='베이스 간 최대 오차 Δx Δy [m] (곡선 주행 실측)')
 ap.add_argument('--F_s', type=float, nargs=2, required=True, help='보상 후 정지 중 남는 손 내력 x y [N] (실측)')
 ap.add_argument('--tau_grip', type=float, default=None, help='그리퍼 토크 [N·m] (기본 gains.yaml gripper_effort)')
+ap.add_argument('--K_F', type=float, default=40.0, help='정한 팔로워 강성 [N/m] (리더 하한의 내력 몫)')
+ap.add_argument('--base_final', type=float, default=0.019, help='베이스 최종 위치 오차 실측 최대 [m]')
+ap.add_argument('--z_step', type=float, default=0.01, help='내려놓기 마지막 단계 [m] (transport_scenario) = z 허용 오차')
 a = ap.parse_args()
 
 G = yaml.safe_load(open(os.path.join(HERE, '../gains.yaml')))
@@ -73,3 +81,18 @@ print('   예측 내력 (팔로워가 오차를 혼자 흡수한다고 볼 때, 
 for KF in (40, 110, 240, 406, 500):
     fx, fy = fsx + KF * dx, fsy + KF * dy
     print(f'     K_F {KF:4d}: x {fx:5.1f}  y {fy:4.1f}  합 {math.hypot(fx, fy):5.1f} N  {"≤" if math.hypot(fx, fy) <= cap else ">"} {cap:.1f}')
+
+print('\n④ 리더 강성 하한 (위치를 지키는 쪽: K_L ≥ F_dist / e_allow)')
+tb = CFG['box']['table_size']
+ex, ey, ez = tb[0] / 2 - a.base_final, tb[1] / 2 - a.base_final, a.z_step
+fdx, fdy, fdz = Fw[0] + a.K_F * dx, Fw[1] + a.K_F * dy, Fw[2]
+print(f'   외란 F_dist = 정지 마찰(최악) + 팔로워 내력 K_F Δ (K_F {a.K_F:g}): x {Fw[0]:.1f} + {a.K_F * dx:.1f} = {fdx:.1f}, '
+      f'y {Fw[1]:.1f} + {a.K_F * dy:.1f} = {fdy:.1f}, z {fdz:.1f} N')
+print(f'   허용 오차 e_allow: x {tb[0] / 2 * 1000:.0f} − {a.base_final * 1000:.0f} = {ex * 1000:.0f} mm, '
+      f'y {tb[1] / 2 * 1000:.0f} − {a.base_final * 1000:.0f} = {ey * 1000:.0f} mm (받침대 반폭 − 베이스 최종 오차), '
+      f'z {ez * 1000:.0f} mm (내려놓기 마지막 단계)')
+kl = [math.ceil(v / 10) * 10 for v in (fdx / ex, fdy / ey, fdz / ez)]
+print(f'   K_L ≥ x {fdx / ex:.0f}, y {fdy / ey:.0f}, z {fdz / ez:.0f} N/m → 10 단위 올림 K_L = ({kl[0]}, {kl[1]}, {kl[2]}) N/m (z는 팔로워도 같은 값)')
+print(f'   팔로워 대비: x {kl[0] / a.K_F:.1f}배, y {kl[1] / a.K_F:.1f}배 → 베이스 오차 중 리더 몫 K_F/(K_L + K_F) = '
+      f'x {a.K_F / (kl[0] + a.K_F) * 100:.0f} %, y {a.K_F / (kl[1] + a.K_F) * 100:.0f} %')
+print('   상한: MR에 정량식 없음 (11.7.1 서술), 정상상태 토크는 K와 무관 → 정하지 않음')
