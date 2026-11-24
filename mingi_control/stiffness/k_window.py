@@ -92,7 +92,7 @@ print(f'   허용 오차 e_allow: x {tb[0] / 2 * 1000:.0f} − {a.base_final * 1
       f'y {tb[1] / 2 * 1000:.0f} − {a.base_final * 1000:.0f} = {ey * 1000:.0f} mm (받침대 반폭 − 베이스 최종 오차), '
       f'z {ez * 1000:.0f} mm (내려놓기 마지막 단계)')
 kl = [math.ceil(v / 10) * 10 for v in (fdx / ex, fdy / ey, fdz / ez)]
-print(f'   K_L ≥ x {fdx / ex:.0f}, y {fdy / ey:.0f}, z {fdz / ez:.0f} N/m → 10 단위 올림 K_L = ({kl[0]}, {kl[1]}, {kl[2]}) N/m (z는 팔로워도 같은 값)')
+print(f'   K_L ≥ x {fdx / ex:.0f}, y {fdy / ey:.0f}, z {fdz / ez:.0f} N/m → (실험·설계는 하한값 그대로 {fdx / ex:.0f} / {fdy / ey:.0f} / {fdz / ez:.0f} 사용) (z는 팔로워도 같은 값)')
 print(f'   팔로워 대비: x {kl[0] / a.K_F:.1f}배, y {kl[1] / a.K_F:.1f}배 → 베이스 오차 중 리더 몫 K_F/(K_L + K_F) = '
       f'x {a.K_F / (kl[0] + a.K_F) * 100:.0f} %, y {a.K_F / (kl[1] + a.K_F) * 100:.0f} %')
 print('   상한: MR에 정량식 없음 (11.7.1 서술), 정상상태 토크는 K와 무관 → 정하지 않음')
