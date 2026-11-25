@@ -25,10 +25,12 @@ docker compose -f docker/compose.yaml down >/dev/null 2>&1
 gui=false; [[ $recmode == gazebo ]] && gui=true && DISPLAY=:0 xhost +si:localuser:root >/dev/null
 DISPLAY=:0 COOP_GUI=$gui docker compose -f docker/compose.yaml up -d --no-build >/dev/null 2>&1 || { echo up failed; exit 1; }
 win=-; crop=""
+# CAM: 카메라 자세 (기본 천장 시점, 11/25 직선 풀 녹화는 옆 시점)
+CAMP=${CAM:-"position: {x: 0.0, y: 1.0, z: 3.6}, orientation: {w: 0.5004, x: -0.4996, y: 0.4996, z: 0.5004}"}
 if [[ $recmode == gazebo ]]; then
   for k in $(seq 60); do win=$(DISPLAY=:0 xwininfo -root -tree 2>/dev/null | awk '/"gz-sim-gui" "Gazebo GUI"/{print $1; exit}'); [[ -n $win ]] && break; sleep 2; done
   sleep 15
-  docker exec internship-gazebo-1 bash -c 'source /opt/ros/jazzy/setup.bash; gz service -s /gui/move_to/pose --reqtype gz.msgs.GUICamera --reptype gz.msgs.Boolean --timeout 3000 --req "pose: {position: {x: 0.0, y: 1.0, z: 3.6}, orientation: {w: 0.5004, x: -0.4996, y: 0.4996, z: 0.5004}}"' >/dev/null
+  docker exec internship-gazebo-1 bash -c 'source /opt/ros/jazzy/setup.bash; gz service -s /gui/move_to/pose --reqtype gz.msgs.GUICamera --reptype gz.msgs.Boolean --timeout 3000 --req "pose: {'"$CAMP"'}"' >/dev/null
   crop="crop=582:796:0:48"
 fi
 "${CLEAN[@]}" "$P exec ros2 launch coop_carry_bringup base_move_curve.launch.py ${BASEP:+params:=$BASEP}" > "$OUT/${tag}_basenode.log" 2>&1 & pids+=($!)
@@ -41,9 +43,16 @@ if [[ $recmode == rviz ]]; then
   echo "rviz window $win"
 fi
 sleep 12
+# FULLREC=1: 파지 시작 ~ 정리까지 창 전체 녹화 + 벽시계↔시뮬 시간 기록 (11/25, 시뮬 시간 실속도 영상용)
+if [[ ${FULLREC:-0} == 1 && $win != - ]]; then
+  "${CLEAN[@]}" "$P exec python3 stiffness/run/clock_log.py $OUT/${tag}_clock.csv" > /dev/null 2>&1 & pids+=($!)
+  date +%s.%N > "$OUT/${tag}_full_start.txt"
+  ffmpeg -y -loglevel error -f x11grab -window_id $win -framerate 10 -i :0 -vf "$crop,crop=trunc(iw/2)*2:trunc(ih/2)*2" \
+    -c:v libx264 -pix_fmt yuv420p "$OUT/${tag}_full_raw.mp4" < /dev/null > "$OUT/${tag}_ffmpeg.log" 2>&1 & recpid=$!
+fi
 "${CLEAN[@]}" "$P timeout -k 30 1500 python3 grasp_sequence.py" > "$OUT/${tag}_grasp.log" 2>&1
 if grep -q "완료: 임피던스" "$OUT/${tag}_grasp.log"; then
-  "${CLEAN[@]}" "$P exec python3 stiffness/run/curve_rec.py $OUT/$tag $win '$crop'" > "$OUT/${tag}_rec.log" 2>&1 & pids+=($!)
+  "${CLEAN[@]}" "$P exec python3 stiffness/run/curve_rec.py $OUT/$tag $([[ ${FULLREC:-0} == 1 ]] && echo - || echo $win) '$crop'" > "$OUT/${tag}_rec.log" 2>&1 & pids+=($!)
   sleep 3
   "${CLEAN[@]}" "$P timeout -k 30 2400 python3 transport_scenario.py --K_follower $KF --K_leader $KL" > "$OUT/${tag}_transport.log" 2>&1
   box=$(grep -o '/[^ ]*_carry_box.csv' "$OUT/${tag}_transport.log" | tail -1)
@@ -55,5 +64,6 @@ if grep -q "완료: 임피던스" "$OUT/${tag}_grasp.log"; then
 else
   echo "$tag grasp failed"; tail -3 "$OUT/${tag}_grasp.log"
 fi
+if [[ -n ${recpid:-} ]]; then kill -INT $recpid; wait $recpid; date +%s.%N > "$OUT/${tag}_full_end.txt"; fi
 cleanup
 echo "=== $tag end $(date +%T)"
