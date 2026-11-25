@@ -3,7 +3,7 @@
 입력 (run1.bash FULLREC=1): <tag>_full_raw.mp4, _full_start.txt, _clock.csv, _grasp.log, _events.csv, _box.csv
 자막: 오른쪽 위 단계 이름 + 배속 (grasp_sequence / transport_scenario 로그) — 힘 시각화 없음
 배속 (시뮬 시간 기준): 들기·주행·내려놓기 ×0.5, 접근·파지·대기 등 움직임 적은 구간 ×2
-사용: python3 full_video.py <데이터 폴더> <tag> <출력.mp4> [--max 최대 길이 s]
+사용: python3 full_video.py <데이터 폴더> <tag> <출력.mp4> [--max 최대 길이 s] [--only 단계 이름]
 """
 import argparse
 import datetime
@@ -64,6 +64,7 @@ def main():
     ap.add_argument('d'); ap.add_argument('tag'); ap.add_argument('out')
     ap.add_argument('--max', type=float, default=170.0, help='출력 최대 길이 [s]')
     ap.add_argument('--fps', type=float, default=10.0)
+    ap.add_argument('--only', default='', help='이 단계 구간만 (예: 베이스 주행)')
     a = ap.parse_args()
     d, tag = a.d, a.tag
     t0 = float(open(os.path.join(d, tag + '_full_start.txt')).read())
@@ -81,6 +82,9 @@ def main():
     # 단계 구간 (시뮬 시간)
     seg = [(ts_s, '')] + [(float(np.interp(t, ck['t_wall'], ck['t_sim'])), n) for t, n in ph]
     seg = [(max(t, ts_s), n) for t, n in seg] + [(ts_e, None)]
+    if a.only:                                               # 한 단계만 잘라냄 (앞뒤 0.5 s 여유)
+        j = [k for k in range(len(seg) - 1) if seg[k][1] == a.only][0]
+        ts_s, ts_e = seg[j][0] - 0.5, seg[j + 1][0] + 0.5
     total = sum((seg[j + 1][0] - seg[j][0]) / KEY.get(seg[j][1], FAST) for j in range(len(seg) - 1))
     c = max(1.0, total / a.max)
     cap = cv2.VideoCapture(raw, cv2.CAP_FFMPEG); k, cur = -1, None
