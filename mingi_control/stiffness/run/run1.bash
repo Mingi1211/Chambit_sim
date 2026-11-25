@@ -31,6 +31,10 @@ if [[ $recmode == gazebo ]]; then
   for k in $(seq 60); do win=$(DISPLAY=:0 xwininfo -root -tree 2>/dev/null | awk '/"gz-sim-gui" "Gazebo GUI"/{print $1; exit}'); [[ -n $win ]] && break; sleep 2; done
   sleep 15
   docker exec internship-gazebo-1 bash -c 'source /opt/ros/jazzy/setup.bash; gz service -s /gui/move_to/pose --reqtype gz.msgs.GUICamera --reptype gz.msgs.Boolean --timeout 3000 --req "pose: {'"$CAMP"'}"' >/dev/null
+  # CAMFOLLOW=<모델>: 그 모델을 따라가는 카메라, CAMOFF = 월드 기준 오프셋 (11/25 팔로워 팔 뻗음 보기)
+  if [[ -n ${CAMFOLLOW:-} ]]; then
+    docker exec internship-gazebo-1 bash -c "source /opt/ros/jazzy/setup.bash; gz service -s /gui/follow --reqtype gz.msgs.StringMsg --reptype gz.msgs.Boolean --timeout 3000 --req 'data: \"$CAMFOLLOW\"'; sleep 3; gz service -s /gui/follow/offset --reqtype gz.msgs.Vector3d --reptype gz.msgs.Boolean --timeout 3000 --req '${CAMOFF:-x: 0.1, y: -1.5, z: 1.4}'" >/dev/null   # 따라가기를 켜면 오프셋이 초기화돼서 뒤에 설정
+  fi
   crop="crop=582:796:0:48"
 fi
 "${CLEAN[@]}" "$P exec ros2 launch coop_carry_bringup base_move_curve.launch.py ${BASEP:+params:=$BASEP}" > "$OUT/${tag}_basenode.log" 2>&1 & pids+=($!)
@@ -47,7 +51,7 @@ sleep 12
 if [[ ${FULLREC:-0} == 1 && $win != - ]]; then
   "${CLEAN[@]}" "$P exec python3 stiffness/run/clock_log.py $OUT/${tag}_clock.csv" > /dev/null 2>&1 & pids+=($!)
   date +%s.%N > "$OUT/${tag}_full_start.txt"
-  ffmpeg -y -loglevel error -f x11grab -window_id $win -framerate 10 -i :0 -vf "$crop,crop=trunc(iw/2)*2:trunc(ih/2)*2" \
+  ffmpeg -y -loglevel error -f x11grab -draw_mouse 0 -window_id $win -framerate 10 -i :0 -vf "$crop,crop=trunc(iw/2)*2:trunc(ih/2)*2" \
     -c:v libx264 -pix_fmt yuv420p "$OUT/${tag}_full_raw.mp4" < /dev/null > "$OUT/${tag}_ffmpeg.log" 2>&1 & recpid=$!
 fi
 "${CLEAN[@]}" "$P timeout -k 30 1500 python3 grasp_sequence.py" > "$OUT/${tag}_grasp.log" 2>&1
