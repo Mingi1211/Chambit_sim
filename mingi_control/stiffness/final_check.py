@@ -27,7 +27,8 @@ CONE, EX, EY, EZ = 36.4, 0.131, 0.181, 0.010
 GROUPS = [('최종 설계 (보상 있음)', ['L1', 'L2', 'L3', 'L5', 'L6', 'L7', 'L8']),
           ('최종 강성, 보상 없음', ['M1', 'M2', 'M3']),
           ('팔로워 상한 초과 K_F 500 (보상 있음)', ['P1', 'P2']),
-          ('최종 설계 직선 주행 (옆 이탈 0)', ['S1'])]
+          ('최종 설계 직선 주행 (옆 이탈 0)', ['S1']),
+          ('풀 녹화 (곡선 V1 / 직선 V2)', ['V1', 'V2'])]
 
 
 def judge(tag):
@@ -49,9 +50,11 @@ def row(tag):
     r = analyze(D, tag); c = base_check(r); b = r['base']; h = r['hand']; B = r['box']
     ok = c['dstart'] < 0.2 and c['final_err'] < 0.05 and c['dy_max'] < 0.05 and not c['invalid']
     tsh = np.interp(h['t'], b['t'], b['ts']) - b['ts'][b['i0']]
-    m = (tsh >= 0) & (tsh <= (B['t_drop'] if B['t_drop'] is not None else 10.0))
-    fxy = np.hypot(h['Fint'][m][:, :, 0], h['Fint'][m][:, :, 1])
-    per = [rolling_median(tsh[m], fxy[:, i]).max() for i in range(4)]
+    te = B['t_drop'] if B['t_drop'] is not None else 10.0
+    # 1 s 창이 늘 꽉 차게 패턴 1 s 전(박스 든 채 정지)부터 이동 중앙값을 구하고 0 ~ te만 봄 (11/25: 0 s 첫 샘플 경계 오류 수정)
+    mw = (tsh >= -1.0) & (tsh <= te); m = (tsh[mw] >= 0)
+    fxy = np.hypot(h['Fint'][mw][:, :, 0], h['Fint'][mw][:, :, 1])
+    per = [rolling_median(tsh[mw], fxy[:, i])[m].max() for i in range(4)]
     pre = (h['t'] > r['t0'] - 20) & (h['t'] < r['t0'])
     fs = np.median(np.abs(h['Fint'][pre]), axis=(0, 1))
     tsb = np.interp(B['t'], b['t'], b['ts']) - b['ts'][b['i0']]

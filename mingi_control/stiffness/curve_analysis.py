@@ -111,8 +111,8 @@ def force_metrics(r, t_end_sim=10.0):
     tsh = np.interp(h['t'], b['t'], b['ts']) - b['ts'][b['i0']]
     t_drop = r['box']['t_drop'] if r.get('box') else None
     te = min(t_end_sim, t_drop) if t_drop is not None else t_end_sim
-    mm = (tsh >= 0) & (tsh <= te)
-    roll = rolling_median(tsh[mm], np.median(h['nint'][mm], axis=1))
+    mm = (tsh >= -1.0) & (tsh <= te)                   # 1 s 창이 꽉 차게 1 s 앞부터 (11/25 경계 수정)
+    roll = rolling_median(tsh[mm], np.median(h['nint'][mm], axis=1))[tsh[mm] >= 0]
     return dict(med=float(np.median(roll)), peak=float(roll.max()), t_end=te)
 
 
