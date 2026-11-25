@@ -1,0 +1,8 @@
+# [김민기 11/24] 박스 파지 곡선 주행 출발 지연 수정 (base_move_node 파라미터, 기본은 모두 꺼짐 = 현대 기존 동작)
+carry_base_move:
+  ros__parameters:
+    side_offset: 0.0          # 직선 (옆 이탈 없음)
+    align_mode: steering     # 조향 관절 3개 × 2로봇이 이동 방향과 align_tol(0.02 rad) 이내로 align_hold(0.2 s) 유지 → 정렬 완료
+    start_floor: true        # 패턴 초반 지령 ≥ align_speed
+    track_feedback: true     # MR (11.17) ẋ = ẋ_d + K_p (x_d − x)
+    track_kp: 1.0            # [1/s]
